@@ -1,0 +1,23 @@
+PowerLevel 使用说明
+===================
+
+首次使用
+1. 将整个 PowerLevel 文件夹解压到本地磁盘，不要直接在压缩包内运行。
+2. 双击“启动工具.cmd”。
+3. 等待浏览器自动打开 http://localhost:8080。
+4. 输入公开的 Moxfield Commander 牌组链接并点击分析。
+
+关闭工具
+- 双击“关闭工具.cmd”。
+
+常见问题
+- Windows 提示安全警告：这是未签名的本地程序，请确认压缩包来源可信后选择继续运行。
+- 没有自动打开网页：手动访问 http://localhost:8080。
+- 提示找不到浏览器：请安装 Microsoft Edge 或 Google Chrome。
+- 启动失败：查看 runtime 文件夹中的 powerlevel.error.log。
+- 评分网站暂时不可用：请稍后重试；部分结果仍可能正常显示。
+
+注意
+- 必须保持网络连接。
+- 只支持公开的 Moxfield 牌组。
+- 不要单独移动 PowerLevel.exe 或 internal 文件夹。

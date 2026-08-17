@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="同时查询 CommanderSalt 与 EDH Power Level 的 Commander 牌组评分。">
+  <title>Commander Power Check</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">COMMANDER DECK ANALYZER</p>
+      <h1>一条链接，<br><span>两种强度视角。</span></h1>
+      <p class="intro">输入公开的 Moxfield 牌组地址，同时获取 CommanderSalt 与 EDH Power Level 的独立分析结果。</p>
+    </header>
+
+    <section class="search-panel" aria-labelledby="search-title">
+      <div class="panel-heading">
+        <span class="step">01</span>
+        <div>
+          <h2 id="search-title">输入牌组链接</h2>
+          <p>仅支持公开的 Moxfield Commander 牌组</p>
+        </div>
+      </div>
+      <form id="analyze-form" novalidate>
+        <label class="sr-only" for="deck-url">Moxfield 牌组地址</label>
+        <div class="input-row">
+          <input id="deck-url" name="url" type="url" required autocomplete="url" spellcheck="false"
+            placeholder="https://moxfield.com/decks/…"
+            value="https://moxfield.com/decks/d8xoDMBAcUOKmd8VjkU66w">
+          <button id="submit-button" type="submit">
+            <span class="button-label">开始分析</span>
+            <span class="button-arrow" aria-hidden="true">↗</span>
+          </button>
+        </div>
+        <p id="form-message" class="form-message" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="loading" class="loading" hidden aria-live="polite">
+      <div class="loader"></div>
+      <div><strong>正在分析牌组</strong><span>EDH Power Level 可能需要约一分钟</span></div>
+    </section>
+
+    <section id="results" class="results" hidden aria-live="polite">
+      <div class="deck-strip">
+        <div>
+          <p class="eyebrow">ANALYSIS COMPLETE</p>
+          <h2 id="deck-name">—</h2>
+          <p id="deck-meta">—</p>
+        </div>
+        <button id="retry-button" class="ghost-button" type="button">重新分析</button>
+      </div>
+      <div id="warning" class="warning" hidden></div>
+      <div class="result-grid">
+        <article class="result-card salt-card">
+          <div class="card-topline"><span>COMMANDERSALT</span><span id="salt-status" class="status">等待</span></div>
+          <div id="salt-content" class="card-content"></div>
+          <a class="provider-link" href="https://www.commandersalt.com/" target="_blank" rel="noopener noreferrer">
+            前往 CommanderSalt <span aria-hidden="true">↗</span>
+          </a>
+        </article>
+        <article class="result-card edh-card">
+          <div class="card-topline"><span>EDH POWER LEVEL</span><span id="edh-status" class="status">等待</span></div>
+          <div id="edh-content" class="card-content"></div>
+          <a class="provider-link" href="https://edhpowerlevel.com/" target="_blank" rel="noopener noreferrer">
+            前往 EDH Power Level <span aria-hidden="true">↗</span>
+          </a>
+        </article>
+      </div>
+      <section id="combo-section" class="catalog-section" hidden>
+        <div class="section-heading"><div><p class="eyebrow">RELATED CARDS</p><h2>关联卡牌与组合</h2></div></div>
+        <div id="combo-list" class="combo-list"></div>
+      </section>
+      <section id="recommendation-section" class="catalog-section" hidden>
+        <div class="section-heading"><div><p class="eyebrow">COMMANDER RECOMMENDATIONS</p><h2>主将关联推荐</h2><p id="recommendation-keywords" class="section-note"></p></div></div>
+        <div id="recommendation-list" class="recommendation-grid"></div>
+      </section>
+      <section id="decklist-section" class="catalog-section" hidden>
+        <div class="section-heading"><div><p class="eyebrow">FULL DECK</p><h2>完整牌表</h2></div><button id="decklist-toggle" class="ghost-button" type="button">展开牌表</button></div>
+        <div id="deck-card-list" class="deck-card-list collapsed"></div>
+      </section>
+      <p class="disclaimer">两个网站使用不同评分模型，结果应分别理解，不计算平均值。卡牌数据由 Scryfall 提供，组合数据由 Commander Spellbook 提供。</p>
+    </section>
+  </main>
+  <div id="card-preview" class="card-preview" role="tooltip" hidden>
+    <img id="card-preview-image" alt="">
+    <span id="card-preview-name"></span>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

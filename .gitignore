@@ -1,0 +1,12 @@
+server.exe
+PowerLevel.exe
+powerlevel
+*.zip
+*.zip.sha256
+.env
+.DS_Store
+runtime/
+.run/
+dist/
+.zcode/
+resourse/
