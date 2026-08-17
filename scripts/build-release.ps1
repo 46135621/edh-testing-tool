@@ -31,7 +31,7 @@ try {
     $env:GOARCH = "amd64"
     $env:CGO_ENABLED = "0"
     try {
-        & go build -trimpath -ldflags "-s -w" -o (Join-Path $appRoot "PowerLevel.exe") ./cmd/server
+        & go build -buildvcs=false -trimpath -ldflags "-s -w" -o (Join-Path $appRoot "PowerLevel.exe") ./cmd/server
         if ($LASTEXITCODE -ne 0) { throw "Windows build failed." }
     } finally {
         $env:GOOS = $previousGOOS
