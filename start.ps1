@@ -93,7 +93,8 @@ $process = Start-Process -FilePath $binaryPath `
     -RedirectStandardOutput $logFile `
     -RedirectStandardError $errorLogFile `
     -PassThru `
-    -WindowStyle Hidden
+    -WindowStyle Hidden `
+    -Environment @{ POWERLEVEL_OPEN_BROWSER = "0" }
 Set-Content -Path $pidFile -Value $process.Id -NoNewline
 
 $deadline = (Get-Date).AddSeconds(35)

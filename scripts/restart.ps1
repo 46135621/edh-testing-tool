@@ -89,7 +89,8 @@ try {
             -RedirectStandardOutput $logFile `
             -RedirectStandardError $errorLogFile `
             -PassThru `
-            -WindowStyle Hidden
+            -WindowStyle Hidden `
+            -Environment @{ POWERLEVEL_OPEN_BROWSER = "0" }
     } finally {
         if ($null -eq $previousAddress) {
             Remove-Item Env:APP_ADDRESS -ErrorAction SilentlyContinue

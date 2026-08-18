@@ -93,7 +93,7 @@ if ($managed) {
     $managed = $null
 }
 
-$process = Start-Process -FilePath $binaryPath -WorkingDirectory $appRoot -RedirectStandardOutput $logFile -RedirectStandardError $errorLogFile -PassThru -WindowStyle Hidden
+$process = Start-Process -FilePath $binaryPath -WorkingDirectory $appRoot -RedirectStandardOutput $logFile -RedirectStandardError $errorLogFile -PassThru -WindowStyle Hidden -Environment @{ POWERLEVEL_OPEN_BROWSER = "0" }
 Set-Content -Path $pidFile -Value $process.Id -NoNewline
 $deadline = (Get-Date).AddSeconds(35)
 do {

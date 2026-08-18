@@ -9,7 +9,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -99,6 +102,12 @@ func main() {
 		serverErrors <- server.ListenAndServe()
 	}()
 
+	// 双击 server.exe 或绕过 start.ps1 直接运行时，也主动打开浏览器。
+	// 仅在用户明确关闭时才跳过，避免后续版本意外删除该行为。
+	if os.Getenv("POWERLEVEL_OPEN_BROWSER") != "0" {
+		go openBrowser(cfg.Address, logger)
+	}
+
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	select {
@@ -115,5 +124,61 @@ func main() {
 			logger.Error("server stopped", "error", err)
 			os.Exit(1)
 		}
+	}
+}
+
+// openBrowser 等待服务就绪后，用默认浏览器打开 web 界面。
+// Windows 依靠正确的浏览器路径；其他平台通过默认 handler 打开。
+func openBrowser(addr string, logger *slog.Logger) {
+	url := browserURL(addr)
+	if url == "" {
+		return
+	}
+	healthURL := url + "healthz"
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				openInBrowser(url, logger)
+				return
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	logger.Warn("server did not become ready in time; skipping browser open", "url", url)
+}
+
+// browserURL 把监听地址折算成可访问的 http URL，忽略动态端口或空地址。
+func browserURL(addr string) string {
+	addr = strings.TrimSpace(addr)
+	switch {
+	case addr == "" || addr == ":0":
+		return ""
+	case strings.HasPrefix(addr, ":"), strings.HasPrefix(addr, "0.0.0.0"), strings.HasPrefix(addr, "[::]"):
+		return "http://127.0.0.1" + addr + "/"
+	default:
+		return "http://" + addr + "/"
+	}
+}
+
+func openInBrowser(url string, logger *slog.Logger) {
+	if browserPath := os.Getenv("BROWSER_PATH"); browserPath != "" {
+		if err := exec.Command(browserPath, url).Start(); err == nil {
+			return
+		}
+	}
+	var err error
+	switch runtime.GOOS {
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		err = exec.Command("xdg-open", url).Start()
+	}
+	if err != nil {
+		logger.Warn("failed to open browser", "error", err, "url", url)
 	}
 }
