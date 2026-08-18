@@ -68,7 +68,8 @@ func (c *Client) Search(ctx context.Context, names []string, limit int) ([]Combo
 	for _, name := range prioritizeNames(names) {
 		endpoint, _ := url.Parse(c.baseURL + "/variants/")
 		query := endpoint.Query()
-		query.Set("q", name)
+		// Query the front face: spellbook's search doesn't recognize "X // Y".
+		query.Set("q", normalizeSpellbookName(name))
 		query.Set("limit", "12")
 		endpoint.RawQuery = query.Encode()
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
@@ -156,15 +157,27 @@ func prioritizeNames(names []string) []string {
 func allComponentsInDeck(item variant, deckNames []string) bool {
 	set := make(map[string]struct{}, len(deckNames))
 	for _, name := range deckNames {
-		set[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+		// Index by front-face name so a deck entry "X // Y" matches both "X // Y"
+		// and "X" (and vice versa) from the combo API. Display names are untouched.
+		set[normalizeSpellbookName(name)] = struct{}{}
 	}
 	if len(item.Uses) < 2 {
 		return false
 	}
 	for _, use := range item.Uses {
-		if _, ok := set[strings.ToLower(use.Card.Name)]; !ok {
+		if _, ok := set[normalizeSpellbookName(use.Card.Name)]; !ok {
 			return false
 		}
 	}
 	return true
+}
+
+// normalizeSpellbookName lowercases and collapses a name to its front face for
+// matching; it does not affect any returned display/image data.
+func normalizeSpellbookName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if index := strings.Index(name, " // "); index > 0 {
+		name = strings.TrimSpace(name[:index])
+	}
+	return name
 }

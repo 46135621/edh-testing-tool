@@ -48,3 +48,35 @@ func TestNormalizeCardKeepsAdventureSingleImage(t *testing.T) {
 		t.Fatalf("unexpected adventure image mapping: %+v", card)
 	}
 }
+
+func TestNormalizeCardCopiesFrontFaceImageWhenTopLevelMissing(t *testing.T) {
+	var raw scryfallCard
+	if err := json.Unmarshal([]byte(`{
+		"name":"Brightclimb Pathway // Grimclimb Pathway","layout":"modal_dfc",
+		"card_faces":[
+			{"name":"Brightclimb Pathway","image_uris":{"small":"front-small","normal":"front-normal"}},
+			{"name":"Grimclimb Pathway","image_uris":{"small":"back-small","normal":"back-normal"}}
+		]
+	}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	card := normalizeCard(raw)
+	if card.Faces[0].ImageSmall != "front-small" || card.Faces[1].ImageNormal != "back-normal" {
+		t.Fatalf("face images lost: %+v", card)
+	}
+}
+
+func TestNormalizeSplitName(t *testing.T) {
+	cases := map[string]string{
+		"dollmaker's shop/porcelain gallery":       "dollmaker's shop",
+		"dollmaker's shop // porcelain gallery":    "dollmaker's shop",
+		"w/x":                                      "w",
+		"who/what/when/where/why":                  "who",
+		"brightclimb pathway // grimclimb pathway": "brightclimb pathway",
+	}
+	for input, want := range cases {
+		if got := normalizeSplitName(input); got != want {
+			t.Fatalf("normalizeSplitName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

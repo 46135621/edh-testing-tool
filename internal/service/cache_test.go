@@ -3,6 +3,8 @@ package service
 import (
 	"testing"
 	"time"
+
+	"powerlevel/internal/providers/cardcatalog"
 )
 
 func TestAnalysisCacheEvictsLeastRecentlyUsed(t *testing.T) {
@@ -48,6 +50,11 @@ func TestAnalysisCacheExpiresAndClones(t *testing.T) {
 	if thirdItems[0].(map[string]any)["label"] != "original" {
 		t.Fatal("nested metrics were shared across cache hits")
 	}
+	cached.Recommendations[0].Cards[0].Fills[0].Label = "changed"
+	fourth, _ := cache.get("a", now)
+	if fourth.Recommendations[0].Cards[0].Fills[0].Label != "加速" {
+		t.Fatal("recommendation fills were shared across cache hits")
+	}
 	if _, ok := cache.get("a", now.Add(time.Second)); ok {
 		t.Fatal("expected expired entry to be removed")
 	}
@@ -55,8 +62,9 @@ func TestAnalysisCacheExpiresAndClones(t *testing.T) {
 
 func testAnalysis(id string) Analysis {
 	return Analysis{
-		Status: "success",
-		Deck:   DeckSummary{ID: id, Commanders: []string{"Commander"}},
+		Status:          "success",
+		Deck:            DeckSummary{ID: id, Commanders: []string{"Commander"}},
+		Recommendations: []RecommendationGroup{{Header: "Mana", Cards: []RecommendedCard{{Card: cardcatalog.Card{Name: "Rock"}, Fills: []RecommendationFill{{ID: "ramp", Label: "加速", Gap: 2}}}}}},
 		Results: map[string]ProviderResult{
 			"provider": {Status: "success", Metrics: map[string]any{"score": 5.0}},
 			"nested": {

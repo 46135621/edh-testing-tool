@@ -1,0 +1,160 @@
+package construction
+
+import (
+	"strings"
+
+	"powerlevel/internal/providers/cardcatalog"
+)
+
+type ClassifiedCard struct {
+	Name     string `json:"name"`
+	Quantity int    `json:"quantity"`
+	Reason   string `json:"reason"`
+}
+
+type Metric struct {
+	ID         string           `json:"id"`
+	Label      string           `json:"label"`
+	Target     int              `json:"target"`
+	Actual     int              `json:"actual"`
+	Gap        int              `json:"gap"`
+	Status     string           `json:"status"`
+	Coverage   float64          `json:"coverage"`
+	Incomplete bool             `json:"incomplete"`
+	Cards      []ClassifiedCard `json:"cards"`
+}
+
+type Report struct {
+	Metrics []Metric `json:"metrics"`
+}
+
+type InputCard struct {
+	Name     string
+	Quantity int
+	Card     cardcatalog.Card
+}
+
+type Match struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Reason string `json:"reason"`
+}
+
+var targets = []struct {
+	id, label string
+	target    int
+}{
+	{"lands", "正向法力", 38},
+	{"plan", "计划相关", 30},
+	{"mass_interaction", "群体干扰", 6},
+	{"single_interaction", "单体干扰", 12},
+	{"draw_discard", "牌差件", 12},
+	{"ramp", "加速", 10},
+}
+
+func Build(cards []InputCard) Report {
+	result := Report{Metrics: make([]Metric, 0, len(targets))}
+	incomplete := false
+	for _, item := range cards {
+		if !hasCatalogData(item.Card) {
+			incomplete = true
+			break
+		}
+	}
+	for _, target := range targets {
+		metric := Metric{ID: target.id, Label: target.label, Target: target.target, Incomplete: incomplete}
+		for _, item := range cards {
+			matched, reason := classify(target.id, item.Card)
+			if !matched {
+				continue
+			}
+			metric.Actual += item.Quantity
+			metric.Cards = append(metric.Cards, ClassifiedCard{Name: item.Name, Quantity: item.Quantity, Reason: reason})
+		}
+		if metric.Target > 0 {
+			metric.Coverage = float64(metric.Actual) / float64(metric.Target)
+			if metric.Coverage > 1 {
+				metric.Coverage = 1
+			}
+		}
+		if metric.Actual < metric.Target {
+			metric.Gap = metric.Target - metric.Actual
+			metric.Status = "short"
+		} else {
+			metric.Status = "met"
+		}
+		result.Metrics = append(result.Metrics, metric)
+	}
+	return result
+}
+
+func Classify(card cardcatalog.Card) []Match {
+	matches := make([]Match, 0, len(targets))
+	for _, target := range targets {
+		matched, reason := classify(target.id, card)
+		if matched {
+			matches = append(matches, Match{ID: target.id, Label: target.label, Reason: reason})
+		}
+	}
+	return matches
+}
+
+func classify(category string, card cardcatalog.Card) (bool, string) {
+	text := strings.ToLower(card.OracleText + " " + faceText(card))
+	typeLine := strings.ToLower(card.TypeLine + " " + faceTypes(card))
+	switch category {
+	case "lands":
+		// "正向法力" = a land, OR a 0-cost artifact that produces mana (Sol Ring,
+		// Mox, Lotus Petal, Mana Crypt). Net-positive mana sources, not just lands.
+		if strings.Contains(typeLine, "land") {
+			return true, "Net-positive mana source (land)"
+		}
+		isFastMana := card.Cmc == 0 && strings.Contains(typeLine, "artifact") && strings.Contains(text, "add ")
+		return isFastMana, "Net-positive mana source (0-cost artifact)"
+	case "mass_interaction":
+		if strings.Contains(text, "each player") || strings.Contains(text, "all creatures") || strings.Contains(text, "destroy all") || strings.Contains(text, "exile all") {
+			return true, "Affects multiple players or permanents"
+		}
+	case "single_interaction":
+		if strings.Contains(text, "target") && (strings.Contains(text, "destroy") || strings.Contains(text, "exile") || strings.Contains(text, "counter target") || strings.Contains(text, "return target")) {
+			return true, "Targeted removal or interaction"
+		}
+	case "draw_discard":
+		if strings.Contains(text, "draw a card") || strings.Contains(text, "draw cards") || strings.Contains(text, "draw that many") || strings.Contains(text, "discard") {
+			return true, "Draws cards or causes discard"
+		}
+	case "ramp":
+		if strings.Contains(typeLine, "land") {
+			return false, ""
+		}
+		if strings.Contains(text, "add {") || strings.Contains(text, "additional land") || strings.Contains(text, "search your library for a basic land") || strings.Contains(text, "costs {") {
+			return true, "Produces mana, finds lands, or reduces cost"
+		}
+	case "plan":
+		if strings.Contains(text, "token") || strings.Contains(text, "proliferate") || strings.Contains(text, "infect") || strings.Contains(text, "poison") || strings.Contains(text, "whenever") {
+			return true, "Heuristic plan/synergy card"
+		}
+	}
+	return false, ""
+}
+
+func hasCatalogData(card cardcatalog.Card) bool {
+	return card.Name != "" || card.TypeLine != "" || card.OracleText != "" || len(card.Faces) > 0
+}
+
+func faceText(card cardcatalog.Card) string {
+	var out strings.Builder
+	for _, face := range card.Faces {
+		out.WriteByte(' ')
+		out.WriteString(face.OracleText)
+	}
+	return out.String()
+}
+func faceTypes(card cardcatalog.Card) string {
+	var out strings.Builder
+	for _, face := range card.Faces {
+		out.WriteByte(' ')
+		out.WriteString(face.TypeLine)
+	}
+	return out.String()
+}

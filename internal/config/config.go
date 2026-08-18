@@ -18,6 +18,7 @@ type Config struct {
 	CardCatalogTTL      time.Duration
 	SpellbookAPIURL     string
 	EDHRECJSONURL       string
+	MoxfieldAPIURL      string
 	CommanderSaltAPIURL string
 	EDHPageURL          string
 	BrowserPath         string
@@ -37,6 +38,7 @@ func Load() Config {
 		CardCatalogTTL:      durationEnv("CARD_CATALOG_TTL", 24*time.Hour),
 		SpellbookAPIURL:     env("SPELLBOOK_API_URL", "https://backend.commanderspellbook.com"),
 		EDHRECJSONURL:       env("EDHREC_JSON_URL", "https://json.edhrec.com"),
+		MoxfieldAPIURL:      env("MOXFIELD_API_URL", "https://api2.moxfield.com"),
 		CommanderSaltAPIURL: env("COMMANDERSALT_API_URL", "https://api.commandersalt.com"),
 		EDHPageURL:          env("EDH_PAGE_URL", "https://edhpowerlevel.com/"),
 		BrowserPath:         env("BROWSER_PATH", ""),

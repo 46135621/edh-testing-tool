@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+func FormatExportPlainText(commanders, mainboard []Card) string {
+	var builder strings.Builder
+	builder.WriteString("Commander\n")
+	builder.WriteString(FormatPlainText(commanders, nil))
+	builder.WriteString("\n\nDeck\n")
+	builder.WriteString(FormatPlainText(nil, mainboard))
+	return strings.TrimSpace(builder.String())
+}
+
 func FormatPlainText(commanders, mainboard []Card) string {
 	commanders = append([]Card(nil), commanders...)
 	mainboard = append([]Card(nil), mainboard...)

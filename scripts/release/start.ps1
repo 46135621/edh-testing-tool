@@ -44,6 +44,30 @@ function Get-HealthURL {
     return "http://$address/healthz"
 }
 
+# 找不到二进制时，尝试从源码在本地构建。这样把仓库 clone 下来后，
+# 只要机器上装过 Go，双击启动脚本也能一键跑起来。
+if (-not (Test-Path $binaryPath -PathType Leaf)) {
+    $goCmd = Get-Command go -ErrorAction SilentlyContinue
+    if ($null -eq $goCmd) { throw "PowerLevel operation failed: no binary and Go is not available." }
+    Push-Location $appRoot
+    try {
+        & go build -o $binaryPath ./cmd/server
+        if ($LASTEXITCODE -ne 0) { throw "PowerLevel operation failed: go build failed." }
+    } finally {
+        Pop-Location
+    }
+}
+if (-not (Test-Path $binaryPath -PathType Leaf)) {
+    $goCmd = Get-Command go -ErrorAction SilentlyContinue
+    if ($null -eq $goCmd) { throw "PowerLevel operation failed: no binary and Go is not available." }
+    Push-Location $appRoot
+    try {
+        & go build -o $binaryPath ./cmd/server
+        if ($LASTEXITCODE -ne 0) { throw "PowerLevel operation failed: go build failed." }
+    } finally {
+        Pop-Location
+    }
+}
 if (-not (Test-Path $binaryPath -PathType Leaf)) { throw "PowerLevel operation failed." }
 New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 if (-not (Test-Path $configFile) -and (Test-Path $configExample)) { Copy-Item $configExample $configFile }
@@ -64,7 +88,9 @@ $healthURL = Get-HealthURL
 $appURL = $healthURL.Substring(0, $healthURL.Length - "/healthz".Length)
 if ($managed) {
     try { $response = Invoke-WebRequest -Uri $healthURL -UseBasicParsing -TimeoutSec 2; if ($response.StatusCode -eq 200) { Start-Process $appURL; Write-Host "PowerLevel status updated."; exit 0 } } catch {}
-    throw "PowerLevel operation failed."
+    Stop-Process -Id $managed.ProcessId -Force -ErrorAction SilentlyContinue
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    $managed = $null
 }
 
 $process = Start-Process -FilePath $binaryPath -WorkingDirectory $appRoot -RedirectStandardOutput $logFile -RedirectStandardError $errorLogFile -PassThru -WindowStyle Hidden

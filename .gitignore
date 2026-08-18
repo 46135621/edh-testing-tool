@@ -1,8 +1,9 @@
-server.exe
 PowerLevel.exe
 powerlevel
 *.zip
 *.zip.sha256
+powerlevel-server.exe
+powerlevel-server.exe~
 .env
 .DS_Store
 runtime/
@@ -10,3 +11,6 @@ runtime/
 dist/
 .zcode/
 resourse/
+construction-request.json
+construction-result.json
+direct-server.exe

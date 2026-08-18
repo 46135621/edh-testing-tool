@@ -2,18 +2,23 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/singleflight"
 
 	"powerlevel/internal/deck"
+	"powerlevel/internal/manabase"
 	"powerlevel/internal/providers/cardcatalog"
 	"powerlevel/internal/providers/commandersalt"
 	"powerlevel/internal/providers/edhrec"
 	"powerlevel/internal/providers/spellbook"
+	"powerlevel/internal/service/construction"
 )
 
 type EDHAnalyzer interface {
@@ -22,6 +27,33 @@ type EDHAnalyzer interface {
 
 type CardCatalog interface {
 	Lookup(context.Context, []string) (map[string]cardcatalog.Card, error)
+	Search(context.Context, string, int) ([]cardcatalog.Card, error)
+}
+
+// LookupCard resolves a single card name to its Scryfall card payload. It is a
+// thin wrapper over the catalog's batch lookup; a miss returns (Card{}, nil) so
+// callers can distinguish "not found" from "catalog unavailable".
+func (a *Analyzer) LookupCard(ctx context.Context, name string) (cardcatalog.Card, error) {
+	if a.cards == nil {
+		return cardcatalog.Card{}, ErrCardData
+	}
+	catalog, err := a.cards.Lookup(ctx, []string{name})
+	if err != nil {
+		return cardcatalog.Card{}, err
+	}
+	card, ok := catalog[strings.ToLower(strings.TrimSpace(name))]
+	if !ok {
+		for key, value := range catalog {
+			if strings.EqualFold(key, strings.TrimSpace(name)) {
+				card, ok = value, true
+				break
+			}
+		}
+	}
+	if !ok {
+		return cardcatalog.Card{}, ErrAddCardNotFound
+	}
+	return card, nil
 }
 
 type Spellbook interface {
@@ -32,8 +64,17 @@ type EDHRecommender interface {
 	Recommend(context.Context, string, int) ([]edhrec.Group, []string, error)
 }
 
+type DeckSource interface {
+	Load(context.Context, string, string) (deck.Deck, error)
+}
+
+type CommanderSaltAnalyzer interface {
+	Analyze(context.Context, string, string) (commandersalt.Result, error)
+}
+
 type Analyzer struct {
-	commanderSalt   *commandersalt.Client
+	deckSource      DeckSource
+	commanderSalt   CommanderSaltAnalyzer
 	edh             EDHAnalyzer
 	cards           CardCatalog
 	spellbook       Spellbook
@@ -44,10 +85,12 @@ type Analyzer struct {
 	partialCacheTTL time.Duration
 	cache           *analysisCache
 	requests        singleflight.Group
+	buildPoolCache  *edhrecPoolCache
 }
 
 func NewAnalyzer(
-	commanderSalt *commandersalt.Client,
+	deckSource DeckSource,
+	commanderSalt CommanderSaltAnalyzer,
 	edh EDHAnalyzer,
 	cards CardCatalog,
 	spellbookClient Spellbook,
@@ -59,6 +102,7 @@ func NewAnalyzer(
 	cacheMaxEntries int,
 ) *Analyzer {
 	return &Analyzer{
+		deckSource:      deckSource,
 		commanderSalt:   commanderSalt,
 		edh:             edh,
 		cards:           cards,
@@ -69,28 +113,34 @@ func NewAnalyzer(
 		cacheTTL:        cacheTTL,
 		partialCacheTTL: partialCacheTTL,
 		cache:           newAnalysisCache(cacheMaxEntries),
+		buildPoolCache:  newEdhrecPoolCache(10 * time.Minute),
 	}
 }
 
-func (a *Analyzer) Analyze(ctx context.Context, sourceURL, sourceID string) (Analysis, error) {
-	if cached, ok := a.cache.get(sourceID, time.Now()); ok {
+func (a *Analyzer) Analyze(ctx context.Context, sourceURL, sourceID string, supplied *deck.Deck) (Analysis, error) {
+	requestKey := sourceID
+	if supplied != nil {
+		requestKey += ":" + deckRevision(supplied.ExportPlainText())
+	}
+	if cached, ok := a.cache.get(requestKey, time.Now()); ok {
 		return cached, nil
 	}
 
-	resultChannel := a.requests.DoChan(sourceID, func() (any, error) {
-		if cached, ok := a.cache.get(sourceID, time.Now()); ok {
+	resultChannel := a.requests.DoChan(requestKey, func() (any, error) {
+		if cached, ok := a.cache.get(requestKey, time.Now()); ok {
 			return cached, nil
 		}
 		sharedCtx, cancel := context.WithTimeout(context.Background(), a.requestTimeout)
 		defer cancel()
-		analysis, err := a.analyze(sharedCtx, sourceURL, sourceID)
+		analysis, err := a.analyze(sharedCtx, sourceURL, sourceID, supplied)
+
 		if err == nil {
 			ttl := a.cacheTTL
 			if analysis.Status == "partial" {
 				ttl = a.partialCacheTTL
 			}
 			if ttl > 0 {
-				a.cache.set(sourceID, analysis, time.Now().Add(ttl))
+				a.cache.set(requestKey, analysis, time.Now().Add(ttl))
 			}
 		}
 		return analysis, err
@@ -107,33 +157,65 @@ func (a *Analyzer) Analyze(ctx context.Context, sourceURL, sourceID string) (Ana
 	}
 }
 
-func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string) (Analysis, error) {
-	commanderCtx, cancelCommander := context.WithTimeout(ctx, a.providerTimeout)
-	commanderResult, commanderErr := a.commanderSalt.Analyze(commanderCtx, sourceURL, sourceID)
-	cancelCommander()
-	if commanderErr != nil {
-		return Analysis{}, fmt.Errorf("load deck through CommanderSalt: %w", commanderErr)
+func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supplied *deck.Deck) (Analysis, error) {
+	var target deck.Deck
+	if supplied != nil {
+		target = *supplied
+		target.SourceURL, target.SourceID = sourceURL, sourceID
+	} else {
+		if a.deckSource == nil {
+			return Analysis{}, errors.New("no deck source is configured")
+		}
+		deckCtx, cancelDeck := context.WithTimeout(ctx, a.providerTimeout)
+		loaded, err := a.deckSource.Load(deckCtx, sourceURL, sourceID)
+		cancelDeck()
+		if err != nil {
+			return Analysis{}, fmt.Errorf("load standard deck: %w", err)
+		}
+		target = loaded
 	}
-
-	analysis := Analysis{
-		Status:  "success",
-		Results: map[string]ProviderResult{"commandersalt": {Status: "success", Metrics: commanderResult.Metrics}},
+	analysis := Analysis{Status: "success", Results: make(map[string]ProviderResult)}
+	if sourceURL != "" && a.commanderSalt != nil {
+		commanderCtx, cancelCommander := context.WithTimeout(ctx, a.providerTimeout)
+		commanderResult, commanderErr := a.commanderSalt.Analyze(commanderCtx, sourceURL, sourceID)
+		cancelCommander()
+		if commanderErr != nil {
+			analysis.Status = "partial"
+			analysis.Results["commandersalt"] = failure(commanderErr)
+			analysis.Warnings = append(analysis.Warnings, "CommanderSalt 分析失败，其他结果仍然可用。")
+		} else {
+			analysis.Results["commandersalt"] = ProviderResult{Status: "success", Metrics: commanderResult.Metrics}
+			if !sameDeck(target, commanderResult.Deck) {
+				analysis.Warnings = append(analysis.Warnings, "DECK_SOURCE_MISMATCH：CommanderSalt 与标准牌表内容不一致。")
+			}
+		}
+	} else {
+		analysis.Results["commandersalt"] = ProviderResult{Status: "unavailable", Error: &ProviderError{Code: "URL_REQUIRED", Message: "CommanderSalt requires a Moxfield URL."}}
 	}
-	analysis.Deck = summarize(commanderResult.Deck)
+	analysis.Deck = summarize(target)
+	analysis.CanonicalDecklist = target.ExportPlainText()
+	analysis.DeckRevision = deckRevision(analysis.CanonicalDecklist)
 	if a.cards != nil {
 		cardCtx, cancelCards := context.WithTimeout(ctx, a.providerTimeout)
-		catalog, cardErr := a.cards.Lookup(cardCtx, deckNames(commanderResult.Deck))
+		catalog, cardErr := a.cards.Lookup(cardCtx, deckNames(target))
 		cancelCards()
 		if cardErr != nil {
 			analysis.Warnings = append(analysis.Warnings, "卡牌图片与详情暂时无法加载。")
 		} else {
-			analysis.DeckCards = buildDisplayCards(commanderResult.Deck, catalog)
+			analysis.DeckCards = buildDisplayCards(target, catalog)
+			inputs := make([]construction.InputCard, 0, len(analysis.DeckCards))
+			for _, item := range analysis.DeckCards {
+				inputs = append(inputs, construction.InputCard{Name: item.Card.Name, Quantity: item.Quantity, Card: item.Card})
+			}
+			report := construction.Build(inputs)
+			analysis.ConstructionReport = &report
+			analysis.Manabase = manabaseReport(target, analysis.DeckCards)
 		}
 	}
 
-	if a.edhrec != nil && a.cards != nil && len(commanderResult.Deck.Commanders) > 0 {
+	if a.edhrec != nil && a.cards != nil && len(target.Commanders) > 0 {
 		recCtx, cancelRec := context.WithTimeout(ctx, a.providerTimeout)
-		groups, keywords, recErr := a.edhrec.Recommend(recCtx, slugify(commanderResult.Deck.Commanders[0].Name), 20)
+		groups, keywords, recErr := a.edhrec.Recommend(recCtx, slugify(target.Commanders[0].Name), 20)
 		cancelRec()
 		if recErr != nil {
 			analysis.Warnings = append(analysis.Warnings, "EDHREC 主将推荐暂时无法加载。")
@@ -143,15 +225,16 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string) (Ana
 			candidateCtx, cancelCandidates := context.WithTimeout(ctx, a.providerTimeout)
 			catalog, catalogErr := a.cards.Lookup(candidateCtx, candidateNames)
 			cancelCandidates()
-			if catalogErr == nil {
-				analysis.Recommendations = filterRecommendationGroups(groups, catalog, analysis.DeckCards, keywords, 8)
+			if catalogErr == nil && analysis.ConstructionReport != nil {
+				analysis.Recommendations = filterRecommendationGroups(groups, catalog, analysis.DeckCards, keywords, analysis.ConstructionReport, 8)
 			}
+
 		}
 	}
 
 	if a.spellbook != nil {
 		comboCtx, cancelCombos := context.WithTimeout(ctx, a.providerTimeout)
-		found, comboErr := a.spellbook.Search(comboCtx, deckNames(commanderResult.Deck), 12)
+		found, comboErr := a.spellbook.Search(comboCtx, deckNames(target), 12)
 		cancelCombos()
 		if comboErr != nil {
 			analysis.Warnings = append(analysis.Warnings, "Commander Spellbook 组合暂时无法加载。")
@@ -161,7 +244,7 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string) (Ana
 	}
 
 	edhCtx, cancelEDH := context.WithTimeout(ctx, a.providerTimeout)
-	edhMetrics, edhErr := a.edh.Analyze(edhCtx, commanderResult.Deck)
+	edhMetrics, edhErr := a.edh.Analyze(edhCtx, target)
 	cancelEDH()
 	if edhErr != nil {
 		analysis.Status = "partial"
@@ -171,6 +254,45 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string) (Ana
 		analysis.Results["edhpowerlevel"] = ProviderResult{Status: "success", Metrics: edhMetrics}
 	}
 	return analysis, nil
+}
+
+func sameDeck(left, right deck.Deck) bool {
+	counts := func(value deck.Deck) map[string]int {
+		result := make(map[string]int)
+		for _, item := range value.Commanders {
+			result["c:"+normalizeCardName(item.Name)] += item.Quantity
+		}
+		for _, item := range value.Mainboard {
+			result["m:"+normalizeCardName(item.Name)] += item.Quantity
+		}
+		return result
+	}
+	a, b := counts(left), counts(right)
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeCardName reduces a card name to a canonical comparison key: lowercased,
+// whitespace-collapsed, and — for split/DFC cards — the front face only, so that
+// "Boggart Trawler // Boggart Bog" and a source that emits just "Boggart Trawler"
+// compare equal. This is comparison-only; display and image resolution are
+// untouched and continue to use the full name.
+func normalizeCardName(name string) string {
+	name = strings.TrimSpace(strings.ToLower(name))
+	for _, sep := range []string{" // ", "///"} {
+		if index := strings.Index(name, sep); index > 0 {
+			name = strings.TrimSpace(name[:index])
+			break
+		}
+	}
+	return name
 }
 
 func slugify(value string) string {
@@ -205,7 +327,23 @@ func recommendationNames(groups []edhrec.Group) []string {
 	return names
 }
 
-func filterRecommendationGroups(groups []edhrec.Group, catalog map[string]cardcatalog.Card, deckCards []DisplayCard, keywords []string, limit int) []RecommendationGroup {
+func filterRecommendationGroups(groups []edhrec.Group, catalog map[string]cardcatalog.Card, deckCards []DisplayCard, keywords []string, report *construction.Report, limit int) []RecommendationGroup {
+	if report == nil || limit <= 0 {
+		return nil
+	}
+	shortfalls := make(map[string]construction.Metric)
+	for _, metric := range report.Metrics {
+		if metric.Incomplete {
+			return nil
+		}
+		if metric.Status == "short" && metric.Gap > 0 {
+			shortfalls[metric.ID] = metric
+		}
+	}
+	if len(shortfalls) == 0 {
+		return nil
+	}
+
 	existing := make(map[string]struct{}, len(deckCards))
 	commanderColors := make(map[string]struct{})
 	for _, item := range deckCards {
@@ -216,22 +354,44 @@ func filterRecommendationGroups(groups []edhrec.Group, catalog map[string]cardca
 			}
 		}
 	}
+	seen := make(map[string]struct{})
 	var result []RecommendationGroup
 	for _, group := range groups {
 		output := RecommendationGroup{Header: group.Header, Tag: group.Tag}
 		for _, item := range group.Cards {
+			if math.IsNaN(item.Synergy) || math.IsInf(item.Synergy, 0) {
+				item.Synergy = 0
+			}
+			if math.IsNaN(item.InclusionRate) || math.IsInf(item.InclusionRate, 0) {
+				item.InclusionRate = 0
+			}
 			card, ok := catalog[strings.ToLower(item.Name)]
 			if !ok {
 				continue
 			}
-			if _, exists := existing[strings.ToLower(card.Name)]; exists {
+			key := strings.ToLower(card.Name)
+			if _, exists := existing[key]; exists {
+				continue
+			}
+			if _, duplicate := seen[key]; duplicate {
 				continue
 			}
 			if card.Legalities["commander"] != "legal" || !colorsAllowed(card.ColorIdentity, commanderColors) {
 				continue
 			}
+			var fills []RecommendationFill
+			for _, match := range construction.Classify(card) {
+				metric, needed := shortfalls[match.ID]
+				if needed {
+					fills = append(fills, RecommendationFill{ID: match.ID, Label: match.Label, Gap: metric.Gap, Reason: match.Reason})
+				}
+			}
+			if len(fills) == 0 {
+				continue
+			}
+			seen[key] = struct{}{}
 			reason := "Recommended by EDHREC in " + group.Header
-			output.Cards = append(output.Cards, RecommendedCard{Card: card, Synergy: item.Synergy, InclusionRate: item.InclusionRate, Reason: reason, SourceURL: item.SourceURL, Keywords: keywords})
+			output.Cards = append(output.Cards, RecommendedCard{Card: card, Synergy: item.Synergy, InclusionRate: item.InclusionRate, Reason: reason, SourceURL: item.SourceURL, Keywords: keywords, Fills: fills})
 			if len(output.Cards) >= limit {
 				break
 			}
@@ -241,6 +401,24 @@ func filterRecommendationGroups(groups []edhrec.Group, catalog map[string]cardca
 		}
 	}
 	return result
+}
+
+func deckRevision(decklist string) string {
+	hash := sha256.Sum256([]byte(decklist))
+	return hex.EncodeToString(hash[:8])
+}
+
+// manabaseReport converts the deck's resolved display cards into the manabase
+// package's input shape and runs the stage-1 Karsten land/color analysis. It is a
+// pure local computation over already-fetched Scryfall data, so it never fails and
+// never adds an external round trip.
+func manabaseReport(target deck.Deck, deckCards []DisplayCard) *manabase.Report {
+	entries := make([]manabase.ClassifyEntry, 0, len(deckCards))
+	for _, item := range deckCards {
+		entries = append(entries, manabase.Entry(item.Card, item.Quantity, item.Commander))
+	}
+	report := manabase.Analyze(entries)
+	return &report
 }
 
 func colorsAllowed(colors []string, allowed map[string]struct{}) bool {

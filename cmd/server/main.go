@@ -19,6 +19,7 @@ import (
 	"powerlevel/internal/providers/commandersalt"
 	"powerlevel/internal/providers/edhpowerlevel"
 	"powerlevel/internal/providers/edhrec"
+	"powerlevel/internal/providers/moxfield"
 	"powerlevel/internal/providers/spellbook"
 	"powerlevel/internal/service"
 )
@@ -50,7 +51,12 @@ func main() {
 	if browserPath == "" {
 		browserPath = edhpowerlevel.BrowserPathFromEnv()
 	}
+	if browserPath == "" {
+		logger.Error("no usable browser found", "hint", "install Chrome/Chromium/Edge or set BROWSER_PATH to its executable")
+		os.Exit(1)
+	}
 	commanderSaltClient := commandersalt.New(cfg.CommanderSaltAPIURL, httpClient)
+	moxfieldClient := moxfield.New(cfg.MoxfieldAPIURL, httpClient)
 	cardCatalogClient := cardcatalog.New(cfg.ScryfallAPIURL, httpClient, cfg.CardCatalogTTL)
 	spellbookClient := spellbook.New(cfg.SpellbookAPIURL, httpClient)
 	edhrecClient := edhrec.New(cfg.EDHRECJSONURL, httpClient)
@@ -61,6 +67,7 @@ func main() {
 	}
 	defer edhClient.Close()
 	analyzer := service.NewAnalyzer(
+		moxfieldClient,
 		commanderSaltClient,
 		edhClient,
 		cardCatalogClient,

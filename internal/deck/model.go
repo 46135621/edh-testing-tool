@@ -39,3 +39,7 @@ func (d Deck) CardCount() int {
 func (d Deck) PlainText() string {
 	return FormatPlainText(d.Commanders, d.Mainboard)
 }
+
+func (d Deck) ExportPlainText() string {
+	return FormatExportPlainText(d.Commanders, d.Mainboard)
+}

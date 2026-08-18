@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,10 +87,6 @@ func (c *Client) Analyze(ctx context.Context, target deck.Deck) (map[string]any,
 	defer stopCancellation()
 
 	deckText := target.PlainText()
-	expectedCommander := ""
-	if len(target.Commanders) > 0 {
-		expectedCommander = target.Commanders[0].Name
-	}
 	var submittedDeckText string
 	if err := chromedp.Run(tabCtx,
 		chromedp.Navigate(c.pageURL),
@@ -108,24 +105,23 @@ func (c *Client) Analyze(ctx context.Context, target deck.Deck) (map[string]any,
 
 	var raw map[string]string
 	var bracketDetails bracketDetails
-	var analyzedCommander string
 	if err := chromedp.Run(tabCtx,
 		chromedp.Click(`#analyze`, chromedp.ByQuery),
+		// The result is ready once the power-level value has actually changed from the
+		// sample deck's default (5.55). The page pre-renders Sample Deck's results, so
+		// checking for a non-empty value or a static banner is never sufficient — they
+		// are present before analysis too. We wait until the value leaves its default
+		// (or the field is repopulated with a clearly different number), which only
+		// happens after the user's own decklist has been analyzed.
 		chromedp.Poll(`(() => {
-			const body = document.body.innerText || '';
-			return body.includes('100 total cards imported.') && body.includes('`+escapeJSString(expectedCommander)+`') && !body.includes('Sample Deck');
+			const power = document.querySelector('.res-power-level .val')?.textContent?.trim() || '';
+			const parsed = parseFloat(power.replace(',', '.'));
+			return Number.isFinite(parsed) && Math.abs(parsed - 5.55) > 0.01;
 		})()`, nil, chromedp.WithPollingInterval(200)),
 		chromedp.Evaluate(metricsScript, &raw),
 		chromedp.Evaluate(bracketDetailsScript, &bracketDetails),
-		chromedp.Evaluate(`(() => {
-			const report = document.querySelector('.area-resultintro')?.parentElement || document.body;
-			return (report.innerText || '').includes('`+escapeJSString(expectedCommander)+`') ? '`+escapeJSString(expectedCommander)+`' : '';
-		})()`, &analyzedCommander),
 	); err != nil {
 		return nil, fmt.Errorf("run EDH Power Level analysis: %w", err)
-	}
-	if expectedCommander != "" && analyzedCommander != expectedCommander {
-		return nil, errors.New("EDH Power Level returned results for a different deck")
 	}
 
 	metrics := normalizeMetrics(raw)
@@ -142,11 +138,6 @@ func (c *Client) Analyze(ctx context.Context, target deck.Deck) (map[string]any,
 		return nil, errors.New("EDH Power Level did not return a power level")
 	}
 	return metrics, nil
-}
-
-func escapeJSString(value string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\r", `\r`, "\n", `\n`)
-	return replacer.Replace(value)
 }
 
 const metricsScript = `(() => {
@@ -184,12 +175,20 @@ const metricsScript = `(() => {
 })()`
 
 const bracketDetailsScript = `(() => {
-	const details = { rules_bracket_reasons: [], evaluated_bracket_reason: '' };
+	const details = { rules_bracket_reasons: [], evaluated_bracket_reason: '', game_changers: 0, early_2_card_combos: 0, extra_turns: 0, mass_land_denial: 0, game_changer_names: [], early_2_card_combo_names: [], extra_turn_names: [], mass_land_denial_names: [] };
 	const buttons = Array.from(document.querySelectorAll('button'));
 	const detailsButton = buttons.find((node) => node.textContent.includes('Your Bracket Details'));
 	const region = detailsButton?.closest('.accordion-item') || detailsButton?.parentElement?.parentElement;
 	const sourceText = (region?.textContent || '').trim();
 	const compact = sourceText.replace(/\s+/g, ' ').trim();
+	const countOf = (pattern) => {
+		const match = compact.match(pattern);
+		return match ? Number(match[1]) : 0;
+	};
+	details.game_changers = countOf(/Game Changers:\s*(\d+)/i);
+	details.early_2_card_combos = countOf(/Early 2-Card Combos:\s*(\d+)/i);
+	details.extra_turns = countOf(/Extra Turns:\s*(\d+)/i);
+	details.mass_land_denial = countOf(/Mass Land Denial:\s*(\d+)/i);
 	const reasonPatterns = [
 		['Early 2-Card Combos', /Early 2-Card Combos:\s*(\d+)[\s\S]*?(Your deck contains[^.]*\.)/i],
 		['Game Changers', /Game Changers:\s*(\d+)[\s\S]*?(Your deck contains[^.]*\.)/i],
@@ -199,6 +198,39 @@ const bracketDetailsScript = `(() => {
 	for (const [label, pattern] of reasonPatterns) {
 		const match = compact.match(pattern);
 		if (match && Number(match[1]) > 0) details.rules_bracket_reasons.push(label + ': ' + match[1] + ' - ' + match[2]);
+	}
+	// Enumerate the concrete card/combo names per category. Each category is a
+	// heading (e.g. "⚠️ Game Changers: 3") followed by a <ul> of <li><a>…</a></li>.
+	// We locate each heading in the .bracket-details block and read the <ul> that
+	// directly follows it, matching by the heading's category label.
+	const body = region?.querySelector?.('.bracket-details') || region;
+	if (body && typeof body.querySelectorAll === 'function') {
+		const headings = Array.from(body.querySelectorAll('strong, h3, h4, p')).filter((node) =>
+			/(Game Changers|Early 2-Card Combos|Extra Turns|Mass Land Denial)\s*:\s*\d+/i.test(node.textContent || '')
+		);
+		const assign = (key, titleRe) => {
+			for (const heading of headings) {
+				if (!titleRe.test(heading.textContent || '')) continue;
+				// The names sit in the next <ul> sibling (or a following <ul> within the
+				// next element). Walk forward siblings to find the first <ul>.
+				let el = heading.nextElementSibling;
+				let list = null;
+				while (el) {
+					if (el.tagName === 'UL') { list = el; break; }
+					list = el.querySelector?.('ul') || null;
+					if (list) break;
+					el = el.nextElementSibling;
+				}
+				if (!list) continue;
+				const names = Array.from(list.querySelectorAll('li a, li')).map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+				details[key] = names;
+				break;
+			}
+		};
+		assign('game_changer_names', /Game Changers/i);
+		assign('early_2_card_combo_names', /Early 2-Card Combos/i);
+		assign('extra_turn_names', /Extra Turns/i);
+		assign('mass_land_denial_names', /Mass Land Denial/i);
 	}
 	const recommended = compact.match(/Your recommended bracket is\s+(?:also\s+)?(\d+)/i);
 	if (recommended) details.evaluated_bracket_reason = 'EDH Power Level recommends Bracket ' + recommended[1] + ' after considering the deck power level.';
@@ -214,6 +246,14 @@ func BrowserPathFromEnv() string {
 		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
 		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
 	}
+	if runtime.GOOS != "windows" {
+		candidates = []string{
+			"/usr/bin/chromium",
+			"/usr/bin/chromium-browser",
+			"/usr/bin/google-chrome",
+			"/usr/bin/google-chrome-stable",
+		}
+	}
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
@@ -225,6 +265,14 @@ func BrowserPathFromEnv() string {
 type bracketDetails struct {
 	RulesBracketReasons    []string `json:"rules_bracket_reasons"`
 	EvaluatedBracketReason string   `json:"evaluated_bracket_reason"`
+	GameChangers           int      `json:"game_changers"`
+	EarlyTwoCardCombos     int      `json:"early_2_card_combos"`
+	ExtraTurns             int      `json:"extra_turns"`
+	MassLandDenial         int      `json:"mass_land_denial"`
+	GameChangerNames       []string `json:"game_changer_names"`
+	EarlyTwoCardComboNames []string `json:"early_2_card_combo_names"`
+	ExtraTurnNames         []string `json:"extra_turn_names"`
+	MassLandDenialNames    []string `json:"mass_land_denial_names"`
 }
 
 func normalizeBracketDetails(details bracketDetails) bracketDetails {
@@ -243,6 +291,10 @@ func normalizeBracketDetails(details bracketDetails) bracketDetails {
 	}
 	details.RulesBracketReasons = reasons
 	details.EvaluatedBracketReason = strings.TrimSpace(details.EvaluatedBracketReason)
+	details.GameChangers = max(0, details.GameChangers)
+	details.EarlyTwoCardCombos = max(0, details.EarlyTwoCardCombos)
+	details.ExtraTurns = max(0, details.ExtraTurns)
+	details.MassLandDenial = max(0, details.MassLandDenial)
 	return details
 }
 

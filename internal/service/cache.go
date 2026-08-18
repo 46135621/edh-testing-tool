@@ -105,6 +105,13 @@ func cloneViaJSON(value any) any {
 }
 
 func cloneAnalysis(source Analysis) Analysis {
+	encoded, err := json.Marshal(source)
+	if err == nil {
+		var cloned Analysis
+		if json.Unmarshal(encoded, &cloned) == nil {
+			return cloned
+		}
+	}
 	cloned := source
 	cloned.Warnings = append([]string(nil), source.Warnings...)
 	cloned.Deck.Commanders = append([]string(nil), source.Deck.Commanders...)

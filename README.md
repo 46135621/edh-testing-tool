@@ -1,10 +1,20 @@
 # Commander Power Check
 
-输入公开的 Moxfield Commander 牌组 URL，同时查询 CommanderSalt 与 EDH Power Level 的评分。
+输入公开的 Moxfield Commander 牌组 URL 或粘贴牌表文本，同时查询 CommanderSalt 与 EDH Power Level 的评分。
+
+## 功能
+
+- **双评分独立展示**：CommanderSalt 与 EDH Power Level 分别给出 Bracket（规则值 / 评估值）与 Power Level，不计算平均值。
+- **EDH Power Level 判定细节**：展示 Game Changers、早期 2-Card Combo、Extra Turns、Mass Land Denial 的具体数量与判定依据。
+- **构筑指标与缺口报告**：按地牌、规划、群体互动、单体互动、抽牌/弃牌、加速六类统计，显示当前数量与缺口。
+- **EDHREC 缺口推荐**：只推荐能补足当前短缺类别的单卡，并说明每张卡的填补理由。
+- **单卡替换预览**：选择一张移除牌与一张加入牌，对比替换前后的构筑指标、牌张数与基础合法性，不修改 Moxfield、不保存版本。
+- **卡图与关联数据**：Scryfall 卡图（含双面牌正反面切换）、Commander Spellbook 组合、EDHREC 推荐。
+- **轻量组牌编辑器**：在本平台内增删卡牌并导出牌表文本。
 
 ## 工作方式
 
-1. 后端严格校验 `https://moxfield.com/decks/{deck-id}` 地址。
+1. 后端严格校验 `https://moxfield.com/decks/{deck-id}` 地址；也可粘贴牌表文本作为标准牌表来源。
 2. CommanderSalt 直接接收该 URL，返回评分和标准化牌表。
 3. 后端将牌表转换成与 Moxfield `Export → Copy Plain Text` 等价的文本。
 4. 后端复用一个 Chromium 进程，通过有界的独立标签页分析 EDH Power Level，并提取结果。
@@ -13,7 +23,9 @@
 
 ## 本地运行
 
-要求：Go 1.24+，以及 Chrome、Chromium 或 Microsoft Edge。
+Windows 用户把仓库 clone 下来后，直接双击根目录的 `start.cmd` 即可启动并自动打开页面，完成后双击 `stop.cmd` 关闭。仓库内已附带编译好的 `server.exe`，**无需安装 Go**、Chrome 或 Git；脚本也会自动查找本机的 Chrome / Chromium / Microsoft Edge。
+
+如果你本机装有 Go 1.24+，删除 `server.exe` 后首次双击也会从源码现场编译（方便你自己改动代码后重跑）：
 
 ```bash
 go run ./cmd/server
@@ -64,13 +76,15 @@ Content-Type: application/json
 
 ## 生成 Windows 免安装包
 
-面向不懂技术的用户，可生成解压即用的 Windows x64 发布包：
+可生成解压即用的 Windows x64 发布包：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
 ```
 
-输出位于 `dist/PowerLevel-windows-amd64-0.1.0.zip`，同时生成 SHA-256 文件。用户解压后双击 `启动工具.cmd`，使用完成后双击 `关闭工具.cmd`，无需安装 Go 或 Git。
+输出位于 `dist/PowerLevel-windows-amd64-0.1.0.zip`，同时生成 SHA-256 文件。解压后双击 `启动工具.cmd`，使用完成后双击 `关闭工具.cmd`，无需安装 Go 或 Git。
+
+> 提示：项目根目录的 `server.exe` 是为了让 clone 后零环境依赖即可双击运行而提交的预编译二进制。每次改动源码后记得重新构建并提交它（`go build -trimpath -ldflags "-s -w" -o server.exe ./cmd/server`），否则仓库里的二进制会和源码异步。
 
 ## 测试与构建
 
