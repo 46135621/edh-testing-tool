@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: go test ./...
 
-      # 编译独立的 server.exe（不含任何启动脚本）
+      # 1) 先编译 Go 服务端（客户端要把它嵌进去，顺序不能换）
       - name: Build server.exe
         shell: pwsh
         run: |
@@ -51,29 +51,60 @@ jobs:
           go build -buildvcs=false -trimpath -ldflags "-s -w" -o server.exe ./cmd/server
           if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 
-      # 生成校验文件，便于下载后核对完整性
-      - name: Checksum
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # runner 自带 Node.js，npm 装预编译的 CLI，比 cargo install 快得多
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+
+      # 2) 把 server.exe 放到 include_bytes! 约定的位置，再编译客户端
+      #    （客户端 exe 内嵌服务端，单文件分发）
+      - name: Build Tauri client (embeds server.exe)
         shell: pwsh
         run: |
-          $hash = (Get-FileHash server.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -Path "server.exe.sha256" -Value "$hash  server.exe" -Encoding ascii
+          New-Item -ItemType Directory -Path src-tauri\binaries -Force | Out-Null
+          Copy-Item server.exe src-tauri\binaries\server-x86_64-pc-windows-msvc.exe
+          Push-Location src-tauri
+          try {
+            tauri build
+            if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
+          } finally { Pop-Location }
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Copy-Item src-tauri\target\release\edh-powerlevel-client.exe .
+          foreach ($f in @("server.exe", "edh-powerlevel-client.exe")) {
+            $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content -Path "$f.sha256" -Value "$hash  $f" -Encoding ascii
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: server-windows-amd64-${{ env.VERSION }}
+          name: edh-powerlevel-${{ env.VERSION }}
           path: |
             server.exe
             server.exe.sha256
+            edh-powerlevel-client.exe
+            edh-powerlevel-client.exe.sha256
           if-no-files-found: error
 
-      # 创建 Release，tag 名形如 v20260818-1842，附件就是 server.exe 本体
+      # 创建 Release，tag 名形如 v20260818-1842
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          name: server ${{ env.VERSION }}
+          name: edh-powerlevel ${{ env.VERSION }}
           files: |
             server.exe
             server.exe.sha256
+            edh-powerlevel-client.exe
+            edh-powerlevel-client.exe.sha256
           generate_release_notes: true
