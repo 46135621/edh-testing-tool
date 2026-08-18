@@ -28,7 +28,7 @@ jobs:
           go-version-file: go.mod   # 自动按 go.mod 里的版本装 Go
           cache: true               # 缓存依赖，加速后续构建
 
-      # 版本号 = HEAD 提交的时间（保留提交者时区），格式 20260818-1837
+      # 版本号 = HEAD 提交的时间（保留提交者时区），格式 20260818-1842
       - name: Resolve version from commit time
         shell: pwsh
         run: |
@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: go test ./...
 
-      # 直接编译 server.exe（与仓库根目录的 start.ps1 / start.cmd 配套）
+      # 编译独立的 server.exe（不含任何启动脚本）
       - name: Build server.exe
         shell: pwsh
         run: |
@@ -51,31 +51,29 @@ jobs:
           go build -buildvcs=false -trimpath -ldflags "-s -w" -o server.exe ./cmd/server
           if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 
-      # 打包：exe + 启动/停止脚本 + 配置模板
-      - name: Package
+      # 生成校验文件，便于下载后核对完整性
+      - name: Checksum
         shell: pwsh
         run: |
-          $zip = "server-windows-amd64-$env:VERSION.zip"
-          Compress-Archive -Path server.exe, start.ps1, start.cmd, stop.cmd, .env.example -DestinationPath $zip -CompressionLevel Optimal
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -Path "$zip.sha256" -Value "$hash  $zip" -Encoding ascii
+          $hash = (Get-FileHash server.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "server.exe.sha256" -Value "$hash  server.exe" -Encoding ascii
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: server-windows-amd64-${{ env.VERSION }}
           path: |
-            server-windows-amd64-*.zip
-            server-windows-amd64-*.zip.sha256
+            server.exe
+            server.exe.sha256
           if-no-files-found: error
 
-      # 创建 Release，tag 名形如 v20260818-1837
+      # 创建 Release，tag 名形如 v20260818-1842，附件就是 server.exe 本体
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           name: server ${{ env.VERSION }}
           files: |
-            server-windows-amd64-*.zip
-            server-windows-amd64-*.zip.sha256
+            server.exe
+            server.exe.sha256
           generate_release_notes: true
