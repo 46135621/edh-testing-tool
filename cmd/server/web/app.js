@@ -64,11 +64,9 @@ const builderAnalyze = document.querySelector('#builder-analyze');
 // The draft being built: commander name + already-chosen mainboard card names.
 let buildCommander = '';
 let buildChosen = [];           // card names (lowercase) already added to the draft
-let buildSeen = [];            // card names already shown (chosen or skipped) this session
 let buildCards = [];            // { name, card? } resolved rows for export/analysis
 let buildColors = [];           // commander color identity (for basic-land gating)
 let buildCandidates = [];       // currently displayed 3 candidates
-let buildCandidateBuffer = [];  // larger candidate pool fetched once, drained locally
 
 const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
 const BUILD_TARGET = 100;
@@ -301,19 +299,17 @@ async function startBuild() {
     const response = await fetch('/api/v1/build-suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commander: name, chosen: [], seen: [], count: 20 })
+      body: JSON.stringify({ commander: name, chosen: [], seen: [], count: 3 })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error?.message || '无法加载主将建议。');
     buildCommander = payload.commander_name || name;
     buildColors = payload.color_identity || [];
     buildChosen = [];
-    buildSeen = [];
     buildCards = [];
     builderWorkflow.hidden = false;
     builderComplete.hidden = true;
-    buildCandidateBuffer = Array.isArray(payload.candidates) ? payload.candidates : [];
-    renderNextLocalBatch();
+    applyBuildCandidates(Array.isArray(payload.candidates) ? payload.candidates : []);
     renderBuilderSidebar();
   } catch (error) {
     builderMessage.textContent = error.message || '加载失败，请重试。';
@@ -360,91 +356,23 @@ function buildMetricLabel(id) {
 
 async function nextBuildBatch() {
   if (!buildCommander) return;
-  await refillBuildBuffer();
-  renderNextLocalBatch();
-}
-
-// How many seen entries may accumulate before skipped (but not chosen) cards are
-// allowed to cycle back in. This must mirror the server's seenRecycleAt so the two
-// sides agree on when a card stops being "hidden" and becomes offerable again.
-const SEEN_RECYCLE_AT = 20;
-
-// A card is offerable if it has not been chosen, and either it has never been seen
-// or we have passed the recycle threshold (in which case skipped cards come back,
-// but chosen ones never do).
-function isOfferable(key) {
-  if (!key) return false;
-  if (buildChosen.includes(key)) return false;
-  if (buildSeen.includes(key) && buildSeen.length <= SEEN_RECYCLE_AT) return false;
-  return true;
-}
-
-// Show the next 3 candidates from the local buffer (no network). Excludes already
-// chosen cards (and seen cards below the recycle threshold) so a re-offer only
-// happens once we have cycled far enough. Seen/chosen cards are also cut out of the
-// buffer here so the "available" count (and the refill gate) reflect only cards
-// that are still offerable.
-function renderNextLocalBatch() {
-  buildCandidateBuffer = buildCandidateBuffer.filter((card) => isOfferable(normalizeBuildName(card.name)));
-  const next = buildCandidateBuffer.slice(0, 3);
-  for (const card of next) {
-    const key = normalizeBuildName(card.name);
-    if (key && !buildSeen.includes(key)) buildSeen.push(key);
-  }
-  buildCandidateBuffer = buildCandidateBuffer.slice(3);
-  applyBuildCandidates(next);
-}
-
-// Refetch a candidate pool from the server (which now caches the EDHREC+Scryfall
-// work inline) and append offerable cards to the local buffer. This only tops the
-// buffer up when it has fewer than 3 offerable cards; the actual 3-at-a-time drain
-// happens in renderNextLocalBatch. Filling before rendering ensures a 换一批 click
-// never no-ops when the previous drain emptied the buffer.
-async function refillBuildBuffer() {
-  if (buildCandidateBuffer.length >= 3) return;
+  // Every refresh draws a fresh random hand straight from the server. There is no
+  // local "seen" tracking or role ordering anymore: the only exclusion criterion is
+  // "already chosen", so skipped cards are immediately eligible to reappear.
+  builderCandidates.innerHTML = '<p class="editor-empty">正在换一批…</p>';
   try {
     const response = await fetch('/api/v1/build-suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commander: buildCommander, chosen: buildChosen, seen: buildSeen, count: 40 })
+      body: JSON.stringify({ commander: buildCommander, chosen: buildChosen, seen: [], count: 3 })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error?.message || '无法加载建议。');
-    for (const card of payload.candidates || []) {
-      const key = normalizeBuildName(card.name);
-      if (isOfferable(key) && !buildCandidateBuffer.some((c) => normalizeBuildName(c.name) === key)) {
-        buildCandidateBuffer.push(card);
-      }
-    }
+    const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+    applyBuildCandidates(candidates);
   } catch (error) {
     builderCandidates.innerHTML = `<p class="form-message">${escapeHTML(error.message || '加载失败')}</p>`;
   }
-}
-
-function addBuildCard(candidate) {
-  if (!candidate?.name) return;
-  const key = normalizeBuildName(candidate.name);
-  if (buildChosen.includes(key)) return;
-  buildChosen.push(key);
-  buildSeen.push(key);
-  buildCards.push({ name: candidate.name, card: candidate.card || {} });
-  // Clear the remaining two candidates immediately and fetch a fresh batch, so the
-  // stale un-picked options never linger on screen after a choice is made.
-  clearBuildCandidates();
-  renderBuilderSidebar();
-  if (isBuilderComplete()) {
-    builderWorkflow.hidden = true;
-    builderComplete.hidden = false;
-  } else {
-    nextBuildBatch();
-  }
-}
-
-// Immediately empty the candidate row (and show a lightweight loading state) so the
-// user never sees the two cards they did not pick still sitting there.
-function clearBuildCandidates() {
-  buildCandidates = [];
-  builderCandidates.innerHTML = '<p class="editor-empty">正在换一批…</p>';
 }
 
 // Normalize a card name to its front-face, lowercased form so split cards
@@ -453,6 +381,22 @@ function normalizeBuildName(name) {
   const trimmed = String(name ?? '').trim().toLowerCase();
   const idx = trimmed.indexOf(' // ');
   return idx > 0 ? trimmed.slice(0, idx).trim() : trimmed;
+}
+
+function addBuildCard(candidate) {
+  if (!candidate?.name) return;
+  const key = normalizeBuildName(candidate.name);
+  if (buildChosen.includes(key)) return;
+  buildChosen.push(key);
+  buildCards.push({ name: candidate.name, card: candidate.card || {} });
+  renderBuilderSidebar();
+  if (isBuilderComplete()) {
+    builderWorkflow.hidden = true;
+    builderComplete.hidden = false;
+  } else {
+    // Fetch a fresh random hand immediately; the un-picked cards vanish with it.
+    nextBuildBatch();
+  }
 }
 
 function addBasicLand(type) {

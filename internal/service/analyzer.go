@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	mathrand "math/rand"
 	"strings"
 	"time"
 
@@ -87,6 +88,7 @@ type Analyzer struct {
 	cache           *analysisCache
 	requests        singleflight.Group
 	buildPoolCache  *edhrecPoolCache
+	rand            *mathrand.Rand
 }
 
 func NewAnalyzer(
@@ -115,6 +117,7 @@ func NewAnalyzer(
 		partialCacheTTL: partialCacheTTL,
 		cache:           newAnalysisCache(cacheMaxEntries),
 		buildPoolCache:  newEdhrecPoolCache(10 * time.Minute),
+		rand:            mathrand.New(mathrand.NewSource(time.Now().UnixNano())),
 	}
 }
 

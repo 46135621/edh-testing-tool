@@ -18,12 +18,6 @@ import (
 // resolved to a usable Scryfall card.
 var ErrBuildCommanderNotFound = errors.New("commander card was not found")
 
-// seenRecycleAt is how many seen entries the front-end may accumulate before the
-// server stops honoring `seen` as a hard exclusion. Below this, skipped cards stay
-// hidden; at or above it, they are allowed to cycle back into later batches so a
-// long draft never runs itself dry by skipping. Chosen cards remain excluded.
-const seenRecycleAt = 20
-
 // BuildCandidate is one suggested card the guided builder may offer the user.
 type BuildCandidate struct {
 	Name        string  `json:"name"`
@@ -49,16 +43,6 @@ type BuildSuggestResponse struct {
 	CommanderName string          `json:"commander_name"`
 	ColorIdentity []string        `json:"color_identity"`
 	Candidates    []BuildCandidate `json:"candidates"`
-}
-
-// buildGapWeights maps a construction metric id to a multiplier that prioritizes
-var buildGapWeights = map[string]float64{
-	"lands":             2.0,
-	"plan":              1.2,
-	"ramp":              1.5,
-	"draw_discard":      1.3,
-	"single_interaction": 1.1,
-	"mass_interaction":   1.0,
 }
 
 // gapTypeQueries maps a construction metric id to the Scryfall type-line fragment
@@ -166,9 +150,9 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 	}
 	chosen[normalizeCardName(commander.Name)] = struct{}{}
 
-	// Everything already surfaced this session (chosen or skipped) is excluded too,
-	// so "换一批" never re-offers a card the user has already seen. This is a
-	// stateless session keyed by the front-end's running `seen` list.
+	// Everything already chosen this session is excluded, so a re-draw never re-offers
+	// a card the user has picked. `seen` is a leftover client-side notion from the old
+	// role-balanced flow and is no longer honored: the only criterion is "not chosen".
 	seen := map[string]struct{}{}
 	for _, name := range request.Seen {
 		seen[normalizeCardName(name)] = struct{}{}
@@ -189,18 +173,11 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 		a.buildPoolCache.set(cacheKey, pool, time.Now())
 	}
 
-	// Re-filter the cached pool against this request's chosen+seen, then rank.
-	// `seen` only excludes a card below the first `seenRecycleAt` entries; past that
-	// many skips we let seen cards cycle back in, so "换一批" never dead-ends just
-	// because the user skipped a lot of cards early on. Chosen cards are never
-	// re-offered.
+	// Re-filter the cached pool to drop already-chosen cards only.
 	var filtered []edhrecPoolCard
 	for _, item := range pool {
 		key := normalizeCardName(item.name)
 		if _, used := chosen[key]; used {
-			continue
-		}
-		if _, shown := seen[key]; shown && len(seen) <= seenRecycleAt {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -210,22 +187,15 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 	// commander page that only yields ~20 unique legal cards), top it up with
 	// Scryfall cards in the commander's colors so the draft can keep growing.
 	if len(filtered) < count {
-		backfill := a.scryfallBackfill(ctx, commander, commanderIdentity, chosen, seen, count-len(filtered))
+		backfill := a.scryfallBackfill(ctx, commander, commanderIdentity, chosen, count-len(filtered))
 		filtered = append(filtered, backfill...)
 	}
 
-	// Rank by gap-fill priority × synergy. A card that fills no gap still gets a
-	// baseline synergy score so it can appear once the category is satisfied.
-	gapMult := a.currentGapMultipliers(ctx, commander, chosen)
-	sort.SliceStable(filtered, func(i, j int) bool {
-		return a.cardBuildScore(filtered[i], gapMult) > a.cardBuildScore(filtered[j], gapMult)
-	})
-
-	// Select `count` candidates while keeping their primary construction role (gap
-	// category) spread out: pick the top card of each distinct role first, then fill
-	// any remaining slots from whatever is left, so a batch of 3 doesn't return three
-	// cards that all cover the same role (e.g. all ramp).
-	selected := diverseSelection(filtered, gapMult, count)
+	// Draw `count` cards uniformly at random. The builder no longer ranks by gap-fill
+	// or synergy and no longer spreads roles; every refresh is just a random hand from
+	// whatever remains in the pool (chosen cards already removed), with no ordering
+	// relationship between the cards in a batch.
+	selected := a.randomSelection(filtered, count)
 
 	candidates := make([]BuildCandidate, 0, len(selected))
 	for _, item := range selected {
@@ -265,44 +235,6 @@ func (a *Analyzer) resolveCandidate(ctx context.Context, name string) (cardcatal
 	return card, true
 }
 
-// resolveCardCached is resolveCandidate but bounded by a tiny in-process memo so the
-// gap-scoring pass over already-chosen cards doesn't re-hit Scryfall for the same
-// names on every batch. Chosen-card identity is stable within a request.
-var resolveMemo struct {
-	sync.Mutex
-	cards map[string]cardcatalog.Card
-}
-
-func (a *Analyzer) resolveCardCached(ctx context.Context, name string) (cardcatalog.Card, bool) {
-	resolveMemo.Lock()
-	if resolveMemo.cards == nil {
-		resolveMemo.cards = make(map[string]cardcatalog.Card)
-	}
-	key := strings.ToLower(strings.TrimSpace(name))
-	if card, ok := resolveMemo.cards[key]; ok {
-		resolveMemo.Unlock()
-		return card, true
-	}
-	resolveMemo.Unlock()
-
-	card, ok := a.resolveCandidate(ctx, name)
-	if ok {
-		resolveMemo.Lock()
-		if resolveMemo.cards == nil {
-			resolveMemo.cards = make(map[string]cardcatalog.Card)
-		}
-		resolveMemo.cards[key] = card
-		if len(resolveMemo.cards) > 512 {
-			for k := range resolveMemo.cards {
-				delete(resolveMemo.cards, k)
-				break
-			}
-		}
-		resolveMemo.Unlock()
-	}
-	return card, ok
-}
-
 // buildPool flattens EDHREC groups into a legality/color-filtered, deduplicated pool
 // of resolved cards. It is the expensive part (network + Scryfall) and its result is
 // memoized per commander by BuildSuggest. Every dedupe key uses normalizeCardName so
@@ -339,35 +271,6 @@ func (a *Analyzer) buildPool(ctx context.Context, groups []edhrec.Group, command
 	return pool
 }
 
-// currentGapMultipliers computes, per construction category, how under-supplied the
-// current draft is. It returns 1.0 for a satisfied category so scoring degrades to
-// pure synergy once a slot is filled.
-func (a *Analyzer) currentGapMultipliers(ctx context.Context, commander cardcatalog.Card, chosen map[string]struct{}) map[string]float64 {
-	mult := map[string]float64{}
-	inputs := []construction.InputCard{{Name: commander.Name, Quantity: 1, Card: commander}}
-	for name := range chosen {
-		card, ok := a.resolveCardCached(ctx, name)
-		if !ok {
-			continue
-		}
-		inputs = append(inputs, construction.InputCard{Name: card.Name, Quantity: 1, Card: card})
-	}
-	report := construction.Build(inputs)
-	for _, metric := range report.Metrics {
-		weight := buildGapWeights[metric.ID]
-		if weight == 0 {
-			weight = 1.0
-		}
-		if metric.Status == "short" {
-			// Larger gap → larger multiplier, so the scarcest category wins.
-			mult[metric.ID] = weight * (1.0 + 0.2*float64(metric.Gap))
-		} else {
-			mult[metric.ID] = 1.0
-		}
-	}
-	return mult
-}
-
 // classifyIDs extracts the metric ids a card fills, as a stable string slice.
 func classifyIDs(matches []construction.Match) []string {
 	ids := make([]string, 0, len(matches))
@@ -377,90 +280,29 @@ func classifyIDs(matches []construction.Match) []string {
 	return ids
 }
 
-// primaryRole returns the single construction category that best represents a card
-// for diversity purposes. It uses the category the card fills that currently carries
-// the largest gap multiplier (i.e. what the draft most needs from it); a card that
-// fills nothing falls back to an empty role. Cards whose only role is "lands" (basic
-// land quick-add territory) are treated distinctly so they never crowd a batch.
-func primaryRole(item edhrecPoolCard, gapMult map[string]float64) string {
-	matches := construction.Classify(item.card)
-	best := ""
-	bestScore := 0.0
-	for _, match := range matches {
-		mult := gapMult[match.ID]
-		if mult == 0 {
-			mult = 1.0
-		}
-		if mult > bestScore {
-			bestScore = mult
-			best = match.ID
-		}
-	}
-	return best
-}
-
-// diverseSelection spreads `count` candidates across distinct primary roles. It walks
-// the already sorted pool once, taking the first card of each unseen role, then tops
-// up any remaining slots from the pool in original order. Deterministic.
-func diverseSelection(pool []edhrecPoolCard, gapMult map[string]float64, count int) []edhrecPoolCard {
+// randomSelection draws up to `count` cards uniformly at random from the pool, so
+// the builder shows a fresh, unranked hand each refresh rather than a role-balanced,
+// gap-ranked batch. The pool is already filtered to legal, chosen-free cards.
+func (a *Analyzer) randomSelection(pool []edhrecPoolCard, count int) []edhrecPoolCard {
 	if count <= 0 {
 		return nil
 	}
 	if count >= len(pool) {
-		return pool
+		count = len(pool)
 	}
+	perm := a.rand.Perm(len(pool))
 	selected := make([]edhrecPoolCard, 0, count)
-	usedRole := map[string]struct{}{}
-	rest := make([]edhrecPoolCard, 0, len(pool))
-	for _, item := range pool {
-		if len(selected) >= count {
-			break
-		}
-		role := primaryRole(item, gapMult)
-		if role == "" {
-			rest = append(rest, item)
-			continue
-		}
-		if _, taken := usedRole[role]; taken {
-			rest = append(rest, item)
-			continue
-		}
-		usedRole[role] = struct{}{}
-		selected = append(selected, item)
-	}
-	// Fill remaining slots from the leftover pool in original (score desc) order.
-	for _, item := range rest {
-		if len(selected) >= count {
-			break
-		}
-		selected = append(selected, item)
+	for _, i := range perm[:count] {
+		selected = append(selected, pool[i])
 	}
 	return selected
 }
 
-// cardBuildScore ranks a candidate: gap-fill multipliers for every category the card
-// fills (summed), times a small synergy weighting. A card filling a scarce category
-// outscores a high-synergy card that fills nothing.
-func (a *Analyzer) cardBuildScore(item edhrecPoolCard, gapMult map[string]float64) float64 {
-	fill := 0.0
-	for _, match := range construction.Classify(item.card) {
-		mult := gapMult[match.ID]
-		if mult == 0 {
-			mult = 1.0
-		}
-		fill += mult
-	}
-	// Synergy stays on a comparable scale to fill multipliers; weight the gap-fill
-	// intent above raw synergy so the builder actually closes construction gaps.
-	return fill + (item.synergy / 100.0)
-}
-
-// scryfallBackfill pulls gap-filling cards from Scryfall when the EDHREC pool is
-// exhausted. It queries by commander color identity plus a type constraint from
-// gapTypeQueries, filtered to Commander-legal cards not already chosen/seen, and
-// returns them as edhrecPoolCard entries with zero synergy (they ranked purely on
-// whether they fill the draft's current gaps).
-func (a *Analyzer) scryfallBackfill(ctx context.Context, commander cardcatalog.Card, commanderIdentity map[string]struct{}, chosen, seen map[string]struct{}, limit int) []edhrecPoolCard {
+// scryfallBackfill pulls Commander-legal cards from Scryfall when the EDHREC pool is
+// exhausted. It queries by commander color identity plus a type constraint, keeps only
+// cards not already chosen (plus the usual basic-land/supplemental exclusions), and
+// returns them as edhrecPoolCard entries with zero synergy.
+func (a *Analyzer) scryfallBackfill(ctx context.Context, commander cardcatalog.Card, commanderIdentity map[string]struct{}, chosen map[string]struct{}, limit int) []edhrecPoolCard {
 	var colors []string
 	for color := range commanderIdentity {
 		colors = append(colors, color)
@@ -483,9 +325,7 @@ func (a *Analyzer) scryfallBackfill(ctx context.Context, commander cardcatalog.C
 			q += " " + queryType
 		}
 		// Ask for far more than `limit` so we can skip basic lands, supplemental
-		// types, and already-seen cards while still filling the request. Post-filter
-		// survivors are typically a small fraction of the raw results, so request
-		// enough raw cards to survive the filtering.
+		// types, and already-chosen cards while still filling the request.
 		cards, err := a.cards.Search(ctx, q, 700)
 		if err != nil {
 			continue // one gap's search failing should not abort the whole backfill
@@ -493,9 +333,6 @@ func (a *Analyzer) scryfallBackfill(ctx context.Context, commander cardcatalog.C
 		for _, card := range cards {
 			key := normalizeCardName(card.Name)
 			if _, used := chosen[key]; used {
-				continue
-			}
-			if _, shown := seen[key]; shown {
 				continue
 			}
 			if _, dup := collected[key]; dup {
