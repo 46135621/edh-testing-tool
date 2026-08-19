@@ -179,7 +179,7 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supp
 		target = loaded
 	}
 	analysis := Analysis{Status: "success", Results: make(map[string]ProviderResult)}
-	if sourceURL != "" && a.commanderSalt != nil {
+	if sourceURL != "" && supplied == nil && a.commanderSalt != nil {
 		commanderCtx, cancelCommander := context.WithTimeout(ctx, a.providerTimeout)
 		commanderResult, commanderErr := a.commanderSalt.Analyze(commanderCtx, sourceURL, sourceID)
 		cancelCommander()
