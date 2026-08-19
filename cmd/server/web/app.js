@@ -55,11 +55,9 @@ const builderCandidates = document.querySelector('#builder-candidates');
 const builderSkip = document.querySelector('#builder-skip');
 const builderLandsButton = document.querySelector('#builder-lands');
 const builderLandsPanel = document.querySelector('#builder-lands-panel');
-const builderLandsClose = document.querySelector('#builder-lands-close');
 const builderLandsGrid = document.querySelector('#builder-lands-grid');
 const builderStaplesButton = document.querySelector('#builder-staples');
 const builderStaplesPanel = document.querySelector('#builder-staples-panel');
-const builderStaplesClose = document.querySelector('#builder-staples-close');
 const builderStaplesCategories = document.querySelector('#builder-staples-categories');
 const builderSidebar = document.querySelector('#builder-sidebar');
 const builderComplete = document.querySelector('#builder-complete');
@@ -76,6 +74,33 @@ let recentShown = [];           // sliding window of names shown (not chosen) in
 
 const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
 const BUILD_TARGET = 100;
+
+// A card (basic lands excepted) is a singleton: one copy at most in the Commander
+// mainboard. We check the authoritative draft list, not the name-only `buildChosen`
+// set, so a quick-add can't slip in a second copy that the export would silently
+// collapse back down to one.
+function isBasicLandName(name) {
+  return BASIC_LANDS.includes(String(name || '').trim());
+}
+
+// True when the draft may legally receive another copy of `name`.
+function canAddBuildCard(name) {
+  if (!name) return false;
+  if (isBasicLandName(name)) return true;
+  return !buildCards.some((card) => normalizeBuildName(card.name) === normalizeBuildName(name));
+}
+
+// Surface a transient reason the add was refused, without clobbering the in-flight
+// "加载中…" state of a running suggestion request.
+let buildRejectTimer = 0;
+function noteBuildReject(message) {
+  builderMessage.textContent = message;
+  if (buildRejectTimer) clearTimeout(buildRejectTimer);
+  buildRejectTimer = setTimeout(() => {
+    builderMessage.textContent = '';
+    buildRejectTimer = 0;
+  }, 2800);
+}
 
 // 一键出地的地牌分类。ID 与后端 service.LandCategories 对齐；点单类后按主将色组
 // 过滤，再渲染可加入草稿的地牌小图。
@@ -351,10 +376,6 @@ function toggleLandsPanel() {
   builderLandsPanel.hidden = false;
 }
 
-function closeLandsPanel() {
-  builderLandsPanel.hidden = true;
-}
-
 // 常见单卡：展开/收起分类按钮，点单个分类按主将色组请求可用单卡并渲染成可点选
 // 的小图，点某张常见单卡把它加入草稿。再次点击已打开的分类会收起它。
 function toggleStaplesPanel() {
@@ -366,11 +387,6 @@ function toggleStaplesPanel() {
   renderCategories(builderStaplesCategories, STAPLE_CATEGORIES, 'data-staple-category');
   builderStaplesPanel.hidden = false;
 }
-
-function closeStaplesPanel() {
-  builderStaplesPanel.hidden = true;
-}
-
 // Render a grid of category buttons into `grid`, tagging each with `attribute`. Any
 // previously rendered result area is left untouched (each category's result is placed
 // in its own dedicated result box, so reopening a category does not duplicate it).
@@ -385,6 +401,10 @@ function addStapleCard(name, card, gameChanger) {
   if (!name) return;
   const key = normalizeBuildName(name);
   if (buildChosen.includes(key)) return;
+  if (!canAddBuildCard(name)) {
+    noteBuildReject('"' + name + '" 是重复普通牌，只能放一张（基本地除外）。');
+    return;
+  }
   if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
   buildChosen.push(key);
   const entry = { name, card: card || { name, type_line: 'Artifact' } };
@@ -474,6 +494,10 @@ async function loadLandCategory(categoryID) {
 
 function addLandCard(name) {
   if (!name) return;
+  if (!canAddBuildCard(name)) {
+    noteBuildReject('"' + name + '" 已经在牌组里了，普通地同样受单卡限制。');
+    return;
+  }
   if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
   buildChosen.push(normalizeBuildName(name));
   buildCards.push({ name, card: { name, type_line: 'Land' } });
@@ -629,6 +653,10 @@ function addBuildCard(candidate) {
   if (!candidate?.name) return;
   const key = normalizeBuildName(candidate.name);
   if (buildChosen.includes(key)) return;
+  if (!canAddBuildCard(candidate.name)) {
+    noteBuildReject('"' + candidate.name + '" 是重复普通牌，只能放一张（基本地除外）。');
+    return;
+  }
   buildChosen.push(key);
   const entry = { name: candidate.name, card: candidate.card || {} };
   if (candidate.game_changer) entry.game_changer = true;
@@ -755,7 +783,15 @@ function builderCardMatches(id, card) {
 
 function builderToDeckText() {
   const commanderLine = buildCommander ? `1 ${buildCommander}` : '';
-  const mainboardLines = buildCards.map((card) => `1 ${card.name}`);
+  const counts = new Map();
+  for (const card of buildCards) {
+    const key = normalizeBuildName(card.name);
+    // Keep the canonical (Scryfall-origin) name for display, but count by key so
+    // split/DFC reprints of the same card still aggregate correctly.
+    if (!counts.has(key)) counts.set(key, { name: card.name, count: 0 });
+    counts.get(key).count += 1;
+  }
+  const mainboardLines = Array.from(counts.values()).map((entry) => `${entry.count} ${entry.name}`);
   return `Commander\n${commanderLine}\n\nDeck\n${mainboardLines.join('\n')}`;
 }
 
@@ -764,9 +800,7 @@ builderClose.addEventListener('click', closeBuilder);
 builderStartButton.addEventListener('click', startBuild);
 builderSkip.addEventListener('click', nextBuildBatch);
 builderLandsButton.addEventListener('click', toggleLandsPanel);
-builderLandsClose.addEventListener('click', closeLandsPanel);
 builderStaplesButton.addEventListener('click', toggleStaplesPanel);
-builderStaplesClose.addEventListener('click', closeStaplesPanel);
 // Collapse/expand the two provider result cards when their top bar is clicked.
 document.addEventListener('click', (event) => {
   const toggle = event.target.closest('[data-card-toggle]');
@@ -774,6 +808,16 @@ document.addEventListener('click', (event) => {
   const card = toggle.closest('.result-card');
   if (!card) return;
   const collapsed = card.classList.toggle('collapsed');
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+});
+// Expand/collapse the CommanderSalt suggestion groups whose contents default to
+// collapsed (当前档位原因 / 提高强度建议). Delegated so dynamically-inserted groups work.
+document.addEventListener('click', (event) => {
+  const toggle = event.target.closest('[data-suggestion-toggle]');
+  if (!toggle) return;
+  const group = toggle.closest('[data-suggestion-group]');
+  if (!group) return;
+  const collapsed = group.classList.toggle('is-collapsed');
   toggle.setAttribute('aria-expanded', String(!collapsed));
 });
 builderExport.addEventListener('click', () => downloadText('decklist.txt', builderToDeckText()));
@@ -1660,6 +1704,9 @@ function splitEDHReason(reason) {
 
 function renderSuggestions(suggestions) {
   if (!suggestions || typeof suggestions !== 'object') return '';
+  // Groups that start collapsed: their contents are long and rarely read up front.
+  // The heading stays clickable to expand on demand.
+  const collapseByDefault = new Set(['rationale', 'harden']);
   const groups = [
     ['rule_zero', '对局前说明', '在开始游戏前值得与牌桌沟通'],
     ['rationale', '当前档位原因', 'CommanderSalt 对当前强度判断的依据'],
@@ -1671,10 +1718,15 @@ function renderSuggestions(suggestions) {
     if (!items.length) return '';
     const rows = items.map(renderSuggestionItem).filter(Boolean).join('');
     if (!rows) return '';
+    const collapsed = collapseByDefault.has(key);
     return `
-      <section class="suggestion-group suggestion-${key.replace('_', '-')}">
-        <div class="suggestion-heading"><strong>${title}</strong><small>${description}</small></div>
-        <div class="suggestion-list">${rows}</div>
+      <section class="suggestion-group suggestion-${key.replace('_', '-')}${collapsed ? ' is-collapsed' : ''}" data-suggestion-group="${key}">
+        <button type="button" class="suggestion-heading" data-suggestion-toggle aria-expanded="${!collapsed}">
+          <strong>${title}</strong><small>${description}</small><span class="suggestion-heading-chevron">▾</span>
+        </button>
+        <div class="suggestion-body${collapsed ? '' : ''}">
+          <div class="suggestion-list">${rows}</div>
+        </div>
       </section>`;
   }).filter(Boolean).join('');
   const summary = String(suggestions.summary ?? '').trim();
