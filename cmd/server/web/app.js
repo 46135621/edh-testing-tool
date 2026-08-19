@@ -1037,12 +1037,17 @@ function renderManabase(manabase) {
 
   const curveHTML = costCounts.length ? (() => {
     const max = Math.max(1, ...costCounts.map((bucket) => Number(bucket.count) || 0));
+    // Scale against the maximum, but keep a visible floor so a 0-count bucket still
+    // shows a short stub rather than disappearing. The final height is written as a
+    // data attribute and animated in via a transition after the container is rendered.
     const rows = costCounts.map((bucket) => {
       const count = Number(bucket.count) || 0;
-      const pct = Math.round((count / max) * 100);
+      const minH = 8;
+      const pct = max > 0 ? count / max : 0;
+      const barH = minH + pct * (100 - minH);
       return `<div class="manabase-curve-row" data-mana-value="${bucket.mana_value ?? ''}">
         <span class="manabase-curve-label">${escapeHTML(bucket.label ?? '')}</span>
-        <div class="manabase-curve-bar"><i style="height:${pct}%"></i></div>
+        <div class="manabase-curve-bar"><i data-height="${barH.toFixed(1)}"></i></div>
         <strong class="manabase-curve-count">${count}</strong>
       </div>`;
     }).join('');
@@ -1063,6 +1068,15 @@ function renderManabase(manabase) {
     ${findings.length ? `
       <div class="manabase-colors-heading"><span>颜色来源需求</span><small>需要 vs 当前（加权）</small></div>
       <div class="manabase-color-grid">${findings.map(renderColorFinding).join('')}</div>` : ''}`;
+
+  // Bars start at height 0 (via CSS) and grow to their data-height on the next frame,
+  // so the curve animates in rather than jumping to final size.
+  requestAnimationFrame(() => {
+    container.querySelectorAll('.manabase-curve-bar i').forEach((bar) => {
+      const height = parseFloat(bar.dataset.height) || 0;
+      bar.style.height = height + 'px';
+    });
+  });
 }
 
 function renderColorFinding(finding) {
