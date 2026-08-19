@@ -217,9 +217,10 @@ function applyBuildCandidates(candidates) {
   buildCandidates = Array.isArray(candidates) ? candidates : [];
   builderCandidates.innerHTML = buildCandidates.map((card, index) => {
     const image = cardImage(card.card);
+    const preview = cardPreviewImage(card.card);
     const fills = (card.fills || []).map((id) => buildMetricLabel(id)).filter(Boolean).join(' · ');
     return `
-      <button type="button" class="builder-candidate" data-candidate="${index}">
+      <button type="button" class="builder-candidate" data-candidate="${index}" data-preview-src="${escapeHTML(preview)}" data-preview-name="${escapeHTML(card.name)}">
         ${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(card.name)}">` : '<div class="builder-candidate-placeholder"></div>'}
         <div class="builder-candidate-body">
           <strong>${escapeHTML(card.name)}</strong>
@@ -233,6 +234,13 @@ function applyBuildCandidates(candidates) {
 function cardImage(card) {
   const cardObj = card || {};
   return cardObj.image_small || cardObj.image_normal || (cardObj.faces || []).find((face) => face.image_small || face.image_normal)?.image_small || (cardObj.faces || []).find((face) => face.image_small || face.image_normal)?.image_normal || '';
+}
+
+// Prefer the larger face image for hover previews; falls back to the small grid
+// image when the card has no normal-size art.
+function cardPreviewImage(card) {
+  const cardObj = card || {};
+  return cardObj.image_normal || cardObj.image_small || (cardObj.faces || []).find((face) => face.image_normal || face.image_small)?.image_normal || (cardObj.faces || []).find((face) => face.image_normal || face.image_small)?.image_small || '';
 }
 
 function buildMetricLabel(id) {
@@ -361,6 +369,25 @@ function renderBuilderSidebar() {
     }
   }
   const total = buildCards.length + (buildCommander ? 1 : 0);
+
+  // Aggregate the drafted mainboard by name so the list shows "2× Sol Ring" style
+  // rows. Card objects are kept so a later hover preview can reuse their art.
+  const byName = new Map();
+  for (const item of buildCards) {
+    const key = normalizeBuildName(item.name);
+    const entry = byName.get(key) || { name: item.name, count: 0, card: item.card };
+    entry.count += 1;
+    if (!entry.card?.name) entry.card = item.card;
+    byName.set(key, entry);
+  }
+  const chosenList = Array.from(byName.values())
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+    .map((entry) => `
+      <li class="builder-chosen-item">
+        <span class="builder-chosen-name">${escapeHTML(entry.name)}</span>
+        <strong class="builder-chosen-count">${entry.count}×</strong>
+      </li>`).join('');
+
   builderSidebar.innerHTML = `
     <div class="builder-progress"><strong>${total}</strong><span>/ ${BUILD_TARGET} 张</span></div>
     ${BUILD_METRICS.map((metric) => {
@@ -368,7 +395,11 @@ function renderBuilderSidebar() {
       const pct = Math.min(100, Math.round((actual / Math.max(1, metric.target)) * 100));
       return `<div class="builder-metric"><div class="builder-metric-head"><span>${metric.label}</span><strong>${actual} / ${metric.target}</strong></div><div class="builder-metric-bar"><i style="width:${pct}%"></i></div></div>`;
     }).join('')}
-    <div class="builder-color-identity"><span>主将色组</span><strong>${(buildColors || []).map((color) => escapeHTML(color)).join(' ') || '无色'}</strong></div>`;
+    <div class="builder-color-identity"><span>主将色组</span><strong>${(buildColors || []).map((color) => escapeHTML(color)).join(' ') || '无色'}</strong></div>
+    <div class="builder-chosen">
+      <div class="builder-chosen-head"><strong>已选牌</strong><span>${buildCards.length}</span></div>
+      ${chosenList ? `<ul class="builder-chosen-list">${chosenList}</ul>` : '<p class="builder-chosen-empty">还没有选择任何牌。</p>'}
+    </div>`;
 }
 
 // A client-side mirror of the server's construction.Classify for live "正向法力"
@@ -1087,9 +1118,9 @@ const previewName = document.querySelector('#card-preview-name');
 const canHover = window.matchMedia('(hover: hover) and (pointer: fine)');
 let activePreviewCard = null;
 
-function showCardPreview(summary) {
-  if (!canHover.matches || !summary) return;
-  const card = summary.closest('.mtg-card');
+function showCardPreview(trigger) {
+  if (!canHover.matches || !trigger) return;
+  const card = trigger.closest('[data-preview-src]');
   const source = card?.dataset.previewSrc;
   if (!source) return;
   activePreviewCard = card;
@@ -1097,13 +1128,13 @@ function showCardPreview(summary) {
   previewImage.alt = card.dataset.previewName || '';
   previewName.textContent = card.dataset.previewName || '';
   preview.hidden = false;
-  requestAnimationFrame(() => positionCardPreview(summary));
+  requestAnimationFrame(() => positionCardPreview(trigger));
 }
 
-function positionCardPreview(summary) {
+function positionCardPreview(trigger) {
   if (preview.hidden) return;
   const gap = 12;
-  const anchor = summary.getBoundingClientRect();
+  const anchor = trigger.getBoundingClientRect();
   const box = preview.getBoundingClientRect();
   let left = anchor.right + gap;
   if (left + box.width > window.innerWidth - gap) left = anchor.left - box.width - gap;
@@ -1120,15 +1151,15 @@ function hideCardPreview() {
 }
 
 document.addEventListener('pointerover', (event) => {
-  const summary = event.target.closest('.mtg-card summary');
-  if (summary && !summary.contains(event.relatedTarget)) showCardPreview(summary);
+  const trigger = event.target.closest('.mtg-card summary, .builder-candidate');
+  if (trigger && !trigger.contains(event.relatedTarget)) showCardPreview(trigger);
 });
 document.addEventListener('pointerout', (event) => {
-  const summary = event.target.closest('.mtg-card summary');
-  if (summary && !summary.contains(event.relatedTarget)) hideCardPreview();
+  const trigger = event.target.closest('.mtg-card summary, .builder-candidate');
+  if (trigger && !trigger.contains(event.relatedTarget)) hideCardPreview();
 });
-document.addEventListener('focusin', (event) => { if (event.target.matches('.mtg-card summary')) showCardPreview(event.target); });
-document.addEventListener('focusout', (event) => { if (event.target.matches('.mtg-card summary')) hideCardPreview(); });
+document.addEventListener('focusin', (event) => { if (event.target.matches('.mtg-card summary, .builder-candidate')) showCardPreview(event.target); });
+document.addEventListener('focusout', (event) => { if (event.target.matches('.mtg-card summary, .builder-candidate')) hideCardPreview(); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideCardPreview(); });
 window.addEventListener('scroll', hideCardPreview, { passive: true });
 window.addEventListener('resize', hideCardPreview);
