@@ -186,6 +186,64 @@ type scryfallCard struct {
 	} `json:"card_faces"`
 }
 
+// Autocomplete returns a list of canonical card names whose beginnings match the
+// given (possibly partial) name, backed by Scryfall's dedicated /cards/autocomplete
+// endpoint. Unlike /cards/named or /cards/search this endpoint is cheap and made
+// exactly for typeahead: it never resolves card payloads, so callers who need color
+// identity or legality must follow up with a normal Lookup. The list is capped and
+// lowercased only for deduping; the original names are returned for display.
+func (c *Client) Autocomplete(ctx context.Context, query string) ([]string, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("autocomplete query is empty")
+	}
+	values := url.Values{}
+	values.Set("q", query)
+	endpoint := c.baseURL + "/cards/autocomplete?" + values.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "PowerLevelAggregator/0.2")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request Scryfall autocomplete: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxResponseSize {
+		return nil, errors.New("Scryfall autocomplete response is too large")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Scryfall autocomplete returned HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		Data []string `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode Scryfall autocomplete: %w", err)
+	}
+	// Scryfall can emit duplicates across faces; keep the first occurrence only.
+	seen := make(map[string]struct{}, len(payload.Data))
+	result := payload.Data[:0]
+	for _, name := range payload.Data {
+		key := normalizeName(name)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, name)
+	}
+	return result, nil
+}
+
 func New(baseURL string, httpClient *http.Client, ttl time.Duration) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), httpClient: httpClient, ttl: ttl, cache: make(map[string]cacheEntry)}
 }

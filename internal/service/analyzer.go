@@ -28,6 +28,7 @@ type EDHAnalyzer interface {
 type CardCatalog interface {
 	Lookup(context.Context, []string) (map[string]cardcatalog.Card, error)
 	Search(context.Context, string, int) ([]cardcatalog.Card, error)
+	Autocomplete(context.Context, string) ([]string, error)
 }
 
 // LookupCard resolves a single card name to its Scryfall card payload. It is a

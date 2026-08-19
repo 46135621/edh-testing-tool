@@ -28,6 +28,10 @@ func (s swapCatalog) Search(_ context.Context, _ string, _ int) ([]cardcatalog.C
 	return nil, nil
 }
 
+func (s swapCatalog) Autocomplete(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
 func TestCompareSwapChangesConstructionMetricsAndPreservesInput(t *testing.T) {
 	legal := map[string]string{"commander": "legal"}
 	catalog := swapCatalog{cards: map[string]cardcatalog.Card{

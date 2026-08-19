@@ -241,9 +241,13 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .builder-head { display: flex; justify-content: space-between; gap: 20px; align-items: start; margin-bottom: 22px; }
 .builder-head h2 { font-size: 25px; }
 .builder-head .section-note { margin: 8px 0 0; }
-.builder-commander-row { display: flex; gap: 10px; }
-.builder-commander-row input { flex: 1; padding: 13px 15px; border: 1px solid #555a50; color: var(--ink); background: #0e100d; font: 13px ui-monospace, monospace; }
+.builder-commander-row { display: flex; gap: 10px; align-items: flex-start; }
+.builder-commander-field { position: relative; flex: 1; }
+.builder-commander-row input { width: 100%; padding: 13px 15px; border: 1px solid #555a50; color: var(--ink); background: #0e100d; font: 13px ui-monospace, monospace; }
 .builder-commander-row input:focus { outline: 0; border-color: var(--acid); }
+.builder-commander-suggestions { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 6px; list-style: none; background: #151713; border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0,0,0,.45); max-height: 260px; overflow-y: auto; }
+.builder-commander-suggestions li { padding: 9px 11px; color: var(--ink); font: 13px ui-monospace, monospace; cursor: pointer; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.builder-commander-suggestions li:hover, .builder-commander-suggestions li.active { background: var(--acid); color: #10120d; }
 .builder-workflow { display: grid; grid-template-columns: 1fr 320px; gap: 22px; margin-top: 22px; }
 .builder-candidates { display: grid; gap: 12px; }
 .builder-candidate { display: flex; gap: 14px; padding: 14px; border: 1px solid var(--line); background: #1a1c18; color: var(--ink); text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }

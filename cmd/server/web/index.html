@@ -53,7 +53,10 @@
         <button id="builder-close" class="ghost-button" type="button">返回分析</button>
       </div>
       <div class="builder-commander-row">
-        <input id="builder-commander" type="text" placeholder="输入主将名称，例如 Ria Ivor, Bane of Bladehold" autocomplete="off" spellcheck="false">
+        <div class="builder-commander-field">
+          <input id="builder-commander" type="text" placeholder="输入主将名称，例如 Ria Ivor, Bane of Bladehold" autocomplete="off" spellcheck="false">
+          <ul id="builder-commander-suggestions" class="builder-commander-suggestions" hidden></ul>
+        </div>
         <button id="builder-start" class="ghost-button" type="button">开始</button>
       </div>
       <p id="builder-message" class="form-message" role="alert"></p>

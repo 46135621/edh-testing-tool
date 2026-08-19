@@ -10,9 +10,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/powerlevel /usr/local/bin/powerlevel
-ENV APP_ADDRESS=:8080 \
+ENV APP_ADDRESS=:18781 \
     BROWSER_PATH=/usr/bin/chromium \
     BROWSER_HEADLESS=true
-EXPOSE 8080
+EXPOSE 18781
 USER nobody
 ENTRYPOINT ["powerlevel"]

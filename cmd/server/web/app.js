@@ -46,6 +46,7 @@ const buildEntryButton = document.querySelector('#build-entry-button');
 const builder = document.querySelector('#builder');
 const builderClose = document.querySelector('#builder-close');
 const builderCommanderInput = document.querySelector('#builder-commander');
+const builderCommanderSuggestions = document.querySelector('#builder-commander-suggestions');
 const builderStartButton = document.querySelector('#builder-start');
 const builderMessage = document.querySelector('#builder-message');
 const builderWorkflow = document.querySelector('#builder-workflow');
@@ -112,7 +113,116 @@ function openBuilder() {
 
 function closeBuilder() {
   builder.hidden = true;
+  hideCommanderSuggestions();
 }
+
+// --- commander autocomplete -------------------------------------------------
+// Typeahead on the builder's commander field. Each keystroke debounces a query to
+// the server, which filters Scryfall autocomplete down to cards legal as a
+// Commander. Out-of-order responses are discarded via AbortController, and selected
+// suggestions are simply written back into the input for the user to start with.
+let commanderAutocompleteController = null;
+let commanderAutocompleteTimer = null;
+let commanderAutocompleteIndex = -1;
+
+function commanderSuggestionItems() {
+  return Array.from(builderCommanderSuggestions.querySelectorAll('[data-suggestion]'));
+}
+
+function renderCommanderSuggestions(names) {
+  commanderAutocompleteIndex = -1;
+  if (!names || names.length === 0) {
+    hideCommanderSuggestions();
+    return;
+  }
+  builderCommanderSuggestions.innerHTML = names.map((name) =>
+    `<li role="option" data-suggestion="${escapeHTML(name)}">${escapeHTML(name)}</li>`).join('');
+  builderCommanderSuggestions.hidden = false;
+}
+
+function hideCommanderSuggestions() {
+  commanderAutocompleteController?.abort();
+  builderCommanderSuggestions.hidden = true;
+  builderCommanderSuggestions.innerHTML = '';
+  commanderAutocompleteIndex = -1;
+}
+
+function highlightCommanderSuggestion(index) {
+  const items = commanderSuggestionItems();
+  items.forEach((item, i) => {
+    item.classList.toggle('active', i === index);
+    if (i === index) item.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+async function queryCommanderSuggestions(query) {
+  const value = String(query ?? '').trim();
+  if (value.length < 2) {
+    hideCommanderSuggestions();
+    return;
+  }
+  commanderAutocompleteController?.abort();
+  const controller = new AbortController();
+  commanderAutocompleteController = controller;
+  try {
+    const response = await fetch(`/api/v1/commander-autocomplete?q=${encodeURIComponent(value)}`, { signal: controller.signal });
+    const payload = await response.json();
+    if (response.ok && Array.isArray(payload.suggestions)) {
+      renderCommanderSuggestions(payload.suggestions);
+    } else {
+      hideCommanderSuggestions();
+    }
+  } catch (error) {
+    // Aborted requests land here intentionally; anything else is a transient miss.
+    if (error.name !== 'AbortError') hideCommanderSuggestions();
+  }
+}
+
+function chooseCommanderSuggestion(name) {
+  builderCommanderInput.value = name;
+  hideCommanderSuggestions();
+  builderCommanderInput.focus();
+}
+
+builderCommanderInput.addEventListener('input', () => {
+  clearTimeout(commanderAutocompleteTimer);
+  commanderAutocompleteTimer = setTimeout(() => queryCommanderSuggestions(builderCommanderInput.value), 220);
+});
+
+builderCommanderInput.addEventListener('keydown', (event) => {
+  const items = commanderSuggestionItems();
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    commanderAutocompleteIndex = Math.min(commanderAutocompleteIndex + 1, items.length - 1);
+    highlightCommanderSuggestion(commanderAutocompleteIndex);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    commanderAutocompleteIndex = Math.max(commanderAutocompleteIndex - 1, 0);
+    highlightCommanderSuggestion(commanderAutocompleteIndex);
+  } else if (event.key === 'Enter') {
+    const active = items[commanderAutocompleteIndex];
+    if (active) {
+      event.preventDefault();
+      chooseCommanderSuggestion(active.dataset.suggestion);
+    }
+  } else if (event.key === 'Escape') {
+    hideCommanderSuggestions();
+  }
+});
+
+builderCommanderInput.addEventListener('blur', () => {
+  // Delay so a click on a suggestion lands before we tear the list down.
+  setTimeout(hideCommanderSuggestions, 120);
+});
+
+builderCommanderSuggestions.addEventListener('mousedown', (event) => {
+  const item = event.target.closest('[data-suggestion]');
+  if (item) {
+    event.preventDefault();
+    chooseCommanderSuggestion(item.dataset.suggestion);
+  }
+});
+
 
 // 一键出地：展开/收起八个地牌分类按钮。点击单个分类按主将色组请求可用地牌，
 // 渲染成可点选的小图，点某张地把它加入草稿。
