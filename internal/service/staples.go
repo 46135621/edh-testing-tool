@@ -25,8 +25,9 @@ type StapleCategory struct {
 // filtering. Card carries the resolved Scryfall payload so the front-end can render
 // image/oracle and classify it into construction metrics without a follow-up lookup.
 type StapleCategoryEntry struct {
-	Name string           `json:"name"`
-	Card cardcatalog.Card `json:"card"`
+	Name        string           `json:"name"`
+	Card        cardcatalog.Card `json:"card"`
+	GameChanger bool             `json:"game_changer"`
 }
 
 // StapleCategoryResult is the set of staples the builder may add for one group.
@@ -147,7 +148,7 @@ func (a *Analyzer) BuildStaples(ctx context.Context, categoryID string, commande
 		if categoryID == "game-changer" && !isGameChanger(card) {
 			continue
 		}
-		entries = append(entries, StapleCategoryEntry{Name: card.Name, Card: card})
+		entries = append(entries, StapleCategoryEntry{Name: card.Name, Card: card, GameChanger: isGameChanger(card)})
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	return StapleCategoryResult{CategoryID: categoryID, CategoryLabel: label, Staples: entries}, nil

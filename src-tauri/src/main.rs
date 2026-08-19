@@ -109,6 +109,15 @@ fn main() {
                 .title("EDH Power Level")
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(960.0, 640.0)
+                .on_navigation(|url| {
+                    // Open any link the front-end navigates to (e.g. the provider/e-drop
+                    // "查看来源"/"在 EDHREC 查看" links) in the user's default browser
+                    // instead of replacing the Tauri window. The window's own origin
+                    // (127.0.0.1) never navigates away, so every navigation event is an
+                    // external link.
+                    let _ = open::that(url.to_string());
+                    false
+                })
                 .build()?;
 
             Ok(())

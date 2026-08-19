@@ -193,12 +193,13 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supp
 				analysis.Warnings = append(analysis.Warnings, "DECK_SOURCE_MISMATCH：CommanderSalt 与标准牌表内容不一致。")
 			}
 		}
-		} else {
-			// No Moxfield URL, so CommanderSalt (which only accepts a linked deck) had
-			// nothing to analyze. `analysis.Warnings` does not change because this is a
-			// known, expected state for pure text input rather than a hard failure.
-			analysis.Results["commandersalt"] = ProviderResult{Status: "unavailable", Error: &ProviderError{Code: "TEXT_INPUT_ONLY", Message: "CommanderSalt 仅支持 Moxfield 链接录入，纯文本牌表无法获得该评分。"}}
-		}
+	} else {
+		// No Moxfield URL, so CommanderSalt (which only accepts a linked deck) had
+		// nothing to analyze. Return an explicit "does not support text input" state
+		// instead of a default deck value. `analysis.Warnings` does not change because
+		// this is a known, expected state rather than a hard failure.
+		analysis.Results["commandersalt"] = ProviderResult{Status: "unavailable", Error: &ProviderError{Code: "TEXT_INPUT_ONLY", Message: "此网站不支持文本录入"}}
+	}
 	analysis.Deck = summarize(target)
 	analysis.CanonicalDecklist = target.ExportPlainText()
 	analysis.DeckRevision = deckRevision(analysis.CanonicalDecklist)

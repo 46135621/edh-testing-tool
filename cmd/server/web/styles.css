@@ -184,8 +184,10 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .recommendation-group-heading { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
 .recommendation-group-heading h3 { margin: 0; font-size: 18px; }
 .recommendation-group-heading span { color: var(--muted); font-size: 12px; }
-.recommendation-row { display: flex; gap: 14px; overflow-x: auto; padding: 0 0 12px; scroll-snap-type: x proximity; }
-.recommendation-card { flex: 0 0 150px; padding: 8px; border: 1px solid var(--line); background: var(--surface); scroll-snap-align: start; }
+.recommendation-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; padding: 0 0 12px; }
+@media (max-width: 900px) { .recommendation-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .recommendation-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.recommendation-card { min-width: 0; padding: 8px; border: 1px solid var(--line); background: var(--surface); }
 .recommendation-card .mtg-card { border: 0; }
 .recommendation-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 9px; background: var(--line); }
 .recommendation-meta div { padding: 8px; background: #1b1d19; }
@@ -257,15 +259,16 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .builder-commander-suggestions li:hover, .builder-commander-suggestions li.active { background: var(--acid); color: #10120d; }
 .builder-workflow { display: grid; grid-template-columns: 1fr 320px; gap: 22px; margin-top: 22px; }
 .builder-candidates { display: grid; gap: 12px; }
-.builder-candidate { display: flex; gap: 14px; padding: 14px; border: 1px solid var(--line); background: #1a1c18; color: var(--ink); text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
+.builder-candidate { display: flex; gap: 16px; padding: 16px; border: 1px solid var(--line); background: #1a1c18; color: var(--ink); text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
 .builder-candidate:hover { border-color: var(--acid); transform: translateX(3px); }
-.builder-candidate img, .builder-candidate-placeholder { flex: 0 0 76px; width: 76px; height: 106px; object-fit: cover; border-radius: 6px; background: #14150f; }
-.builder-candidate-body { display: grid; gap: 5px; align-content: start; }
+.builder-candidate img, .builder-candidate-placeholder { flex: 0 0 88px; width: 88px; height: 123px; object-fit: cover; border-radius: 6px; background: #14150f; }
+.builder-candidate-body { display: grid; gap: 7px; align-content: start; align-items: start; justify-items: start; }
 .builder-candidate-title { display: flex; align-items: center; gap: 6px; }
-.builder-candidate-title strong { font-size: 16px; }
+.builder-candidate-title strong { font-size: 17px; }
 .builder-gc-tag { flex: 0 0 auto; padding: 1px 5px; border-radius: 3px; background: #f5d442; color: #1a1603; font: 800 10px ui-monospace, monospace; letter-spacing: .04em; line-height: 1.4; }
-.builder-synergy { color: var(--acid); font: 700 11px ui-monospace, monospace; }
-.builder-candidate-body small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.builder-synergy { color: var(--acid); font: 700 12px ui-monospace, monospace; letter-spacing: .02em; }
+.builder-candidate-body small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.builder-candidate-title strong { font-size: 17px; }
 .builder-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
 .builder-basics { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .builder-basics-label { color: var(--muted); font-size: 12px; }

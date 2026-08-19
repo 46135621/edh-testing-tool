@@ -381,13 +381,15 @@ function renderCategories(grid, categories, attribute) {
     </button>`).join('');
 }
 
-function addStapleCard(name, card) {
+function addStapleCard(name, card, gameChanger) {
   if (!name) return;
   const key = normalizeBuildName(name);
   if (buildChosen.includes(key)) return;
   if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
   buildChosen.push(key);
-  buildCards.push({ name, card: card || { name, type_line: 'Artifact' } });
+  const entry = { name, card: card || { name, type_line: 'Artifact' } };
+  if (gameChanger) entry.game_changer = true;
+  buildCards.push(entry);
   renderBuilderSidebar();
   if (isBuilderComplete()) {
     builderWorkflow.hidden = true;
@@ -426,7 +428,8 @@ async function loadStapleCategory(categoryID) {
     resultBox.innerHTML = `<div class="builder-lands-head"><strong>${escapeHTML(payload.category_label || category?.label || '')}</strong><small>点击加入草稿</small></div>
       <div class="builder-lands-cards">${staples.map((staple) => {
         const image = cardImage(staple.card);
-        return `<button type="button" class="builder-land-card" data-staple-name="${escapeHTML(staple.name)}" data-staple-card="${escapeHTML(JSON.stringify(staple.card || {}))}">${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(staple.name)}">` : '<div class="builder-candidate-placeholder"></div>'}<span>${escapeHTML(staple.name)}</span></button>`;
+        const card = staple.card || {};
+        return `<button type="button" class="builder-land-card" data-staple-name="${escapeHTML(staple.name)}" data-staple-card="${escapeHTML(JSON.stringify(card))}" data-staple-gc="${staple.game_changer ? '1' : '0'}">${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(staple.name)}">` : '<div class="builder-candidate-placeholder"></div>'}<span>${escapeHTML(staple.name)}</span></button>`;
       }).join('')}</div>`;
   } catch (error) {
     resultBox.innerHTML = `<p class="form-message">${escapeHTML(error.message || '加载失败')}</p>`;
@@ -548,7 +551,7 @@ function applyBuildCandidates(candidates) {
         ${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(card.name)}">` : '<div class="builder-candidate-placeholder"></div>'}
         <div class="builder-candidate-body">
           <div class="builder-candidate-title">${gcBadge}<strong>${escapeHTML(card.name)}</strong></div>
-          <span class="builder-synergy">Synergy ${(Number(card.synergy) || 0).toFixed(0)}%</span>
+          <span class="builder-synergy">Synergy ${(Number(card.synergy) || 0).toFixed(2)}%</span>
           ${fills ? `<small>补足：${escapeHTML(fills)}</small>` : ''}
         </div>
       </button>`;
@@ -627,7 +630,9 @@ function addBuildCard(candidate) {
   const key = normalizeBuildName(candidate.name);
   if (buildChosen.includes(key)) return;
   buildChosen.push(key);
-  buildCards.push({ name: candidate.name, card: candidate.card || {} });
+  const entry = { name: candidate.name, card: candidate.card || {} };
+  if (candidate.game_changer) entry.game_changer = true;
+  buildCards.push(entry);
   renderBuilderSidebar();
   if (isBuilderComplete()) {
     builderWorkflow.hidden = true;
@@ -698,7 +703,7 @@ function renderBuilderSidebar() {
     .sort((a, b) => String(a.name).localeCompare(String(b.name)))
     .map((entry) => `
       <li class="builder-chosen-item">
-        <span class="builder-chosen-name">${escapeHTML(entry.name)}</span>
+        <span class="builder-chosen-name">${entry.card?.game_changer ? '<span class="builder-gc-tag" title="Game Changer">GC</span>' : ''}${escapeHTML(entry.name)}</span>
         <span class="builder-chosen-side">
           <strong class="builder-chosen-count">${entry.count}×</strong>
           <button type="button" class="builder-chosen-remove" data-remove-name="${escapeHTML(entry.name)}" title="移除一张" aria-label="移除 ${escapeHTML(entry.name)}">−</button>
@@ -811,7 +816,8 @@ document.addEventListener('click', (event) => {
     } catch {
       card = {};
     }
-    addStapleCard(stapleCard.dataset.stapleName || '', card);
+    const isGc = stapleCard.dataset.stapleGc === '1';
+    addStapleCard(stapleCard.dataset.stapleName || '', card, isGc);
     return;
   }
   const basicButton = event.target.closest('[data-basic]');
