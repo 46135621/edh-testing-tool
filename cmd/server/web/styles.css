@@ -69,7 +69,12 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .result-card { min-height: 360px; border: 1px solid var(--line); background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
 .result-card::before { content: ""; display: block; height: 5px; flex: 0 0 5px; background: var(--orange); }
 .edh-card::before { background: var(--blue); }
-.card-topline { display: flex; justify-content: space-between; padding: 20px 22px; border-bottom: 1px solid var(--line); font: 700 12px ui-monospace, monospace; letter-spacing: .12em; }
+.card-topline { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 20px 22px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); font: 700 12px ui-monospace, monospace; letter-spacing: .12em; text-align: left; cursor: pointer; }
+.card-topline::after { content: "▾"; margin-left: 12px; color: var(--muted); font-size: 14px; transition: transform .15s; }
+.result-card.collapsed .card-topline { border-bottom-color: transparent; }
+.result-card.collapsed .card-topline::after { transform: rotate(-90deg); }
+.result-card.collapsed .card-content,
+.result-card.collapsed .provider-link { display: none; }
 .status { color: var(--muted); }
 .status.success { color: var(--acid); }
 .status.error { color: var(--orange); }
@@ -275,6 +280,7 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .builder-land-category:hover { border-color: var(--acid); }
 .builder-land-category strong { font-size: 14px; }
 .builder-lands-result { margin-top: 14px; }
+.builder-lands-result.collapsed { display: none; }
 .builder-lands-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; }
 .builder-land-card { display: grid; gap: 6px; padding: 8px; text-align: center; border: 1px solid var(--line); background: #1a1c18; color: var(--ink); border-radius: 8px; cursor: pointer; transition: border-color .15s, transform .15s; }
 .builder-land-card:hover { border-color: var(--acid); transform: translateY(-2px); }

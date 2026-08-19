@@ -340,19 +340,15 @@ editorAddSuggestions.addEventListener('mousedown', (event) => {
 
 
 // 一键出地：展开/收起八个地牌分类按钮。点击单个分类按主将色组请求可用地牌，
-// 渲染成可点选的小图，点某张地把它加入草稿。
+// 渲染成可点选的小图，点某张地把它加入草稿。再次点击已打开的分类会收起它。
 function toggleLandsPanel() {
   const visible = !builderLandsPanel.hidden;
   if (visible) {
     builderLandsPanel.hidden = true;
     return;
   }
-  builderLandsGrid.innerHTML = LAND_CATEGORIES.map((category) => `
-    <button type="button" class="builder-land-category" data-land-category="${category.id}">
-      <strong>${category.label}</strong>
-    </button>`).join('');
+  renderCategories(builderLandsGrid, LAND_CATEGORIES, 'data-land-category');
   builderLandsPanel.hidden = false;
-  builderLandsGrid.innerHTML += '<div id="builder-lands-result" class="builder-lands-result"></div>';
 }
 
 function closeLandsPanel() {
@@ -360,22 +356,29 @@ function closeLandsPanel() {
 }
 
 // 常见单卡：展开/收起分类按钮，点单个分类按主将色组请求可用单卡并渲染成可点选
-// 的小图，点某张常见单卡把它加入草稿。
+// 的小图，点某张常见单卡把它加入草稿。再次点击已打开的分类会收起它。
 function toggleStaplesPanel() {
   const visible = !builderStaplesPanel.hidden;
   if (visible) {
     builderStaplesPanel.hidden = true;
     return;
   }
-  builderStaplesCategories.innerHTML = STAPLE_CATEGORIES.map((category) => `
-    <button type="button" class="builder-land-category" data-staple-category="${category.id}">
-      <strong>${category.label}</strong>
-    </button>`).join('');
+  renderCategories(builderStaplesCategories, STAPLE_CATEGORIES, 'data-staple-category');
   builderStaplesPanel.hidden = false;
 }
 
 function closeStaplesPanel() {
   builderStaplesPanel.hidden = true;
+}
+
+// Render a grid of category buttons into `grid`, tagging each with `attribute`. Any
+// previously rendered result area is left untouched (each category's result is placed
+// in its own dedicated result box, so reopening a category does not duplicate it).
+function renderCategories(grid, categories, attribute) {
+  grid.innerHTML = categories.map((category) => `
+    <button type="button" class="builder-land-category" ${attribute}="${category.id}">
+      <strong>${category.label}</strong>
+    </button>`).join('');
 }
 
 function addStapleCard(name, card) {
@@ -397,7 +400,15 @@ function addStapleCard(name, card) {
 async function loadStapleCategory(categoryID) {
   const resultBox = document.querySelector('#builder-staples-result');
   if (!resultBox) return;
+  if (resultBox.dataset.activeCategory === categoryID && !resultBox.classList.contains('collapsed')) {
+    resultBox.classList.add('collapsed');
+    resultBox.innerHTML = '';
+    delete resultBox.dataset.activeCategory;
+    return;
+  }
+  resultBox.dataset.activeCategory = categoryID;
   const category = STAPLE_CATEGORIES.find((item) => item.id === categoryID);
+  resultBox.classList.remove('collapsed');
   resultBox.innerHTML = '<p class="editor-empty">正在加载单卡…</p>';
   try {
     const response = await fetch('/api/v1/build-staples', {
@@ -425,7 +436,15 @@ async function loadStapleCategory(categoryID) {
 async function loadLandCategory(categoryID) {
   const resultBox = document.querySelector('#builder-lands-result');
   if (!resultBox) return;
+  if (resultBox.dataset.activeCategory === categoryID && !resultBox.classList.contains('collapsed')) {
+    resultBox.classList.add('collapsed');
+    resultBox.innerHTML = '';
+    delete resultBox.dataset.activeCategory;
+    return;
+  }
+  resultBox.dataset.activeCategory = categoryID;
   const category = LAND_CATEGORIES.find((item) => item.id === categoryID);
+  resultBox.classList.remove('collapsed');
   resultBox.innerHTML = '<p class="editor-empty">正在加载地牌…</p>';
   try {
     const response = await fetch('/api/v1/build-lands', {
@@ -742,6 +761,15 @@ builderLandsButton.addEventListener('click', toggleLandsPanel);
 builderLandsClose.addEventListener('click', closeLandsPanel);
 builderStaplesButton.addEventListener('click', toggleStaplesPanel);
 builderStaplesClose.addEventListener('click', closeStaplesPanel);
+// Collapse/expand the two provider result cards when their top bar is clicked.
+document.addEventListener('click', (event) => {
+  const toggle = event.target.closest('[data-card-toggle]');
+  if (!toggle) return;
+  const card = toggle.closest('.result-card');
+  if (!card) return;
+  const collapsed = card.classList.toggle('collapsed');
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+});
 builderExport.addEventListener('click', () => downloadText('decklist.txt', builderToDeckText()));
 builderAnalyze.addEventListener('click', () => {
   decklistInput.value = builderToDeckText();
@@ -1438,6 +1466,7 @@ const previewImage = document.querySelector('#card-preview-image');
 const previewName = document.querySelector('#card-preview-name');
 const canHover = window.matchMedia('(hover: hover) and (pointer: fine)');
 let activePreviewCard = null;
+let previewImageCache = new Map(); // url -> resolved element (pre-loaded large art)
 
 function showCardPreview(trigger) {
   if (!canHover.matches || !trigger) return;
@@ -1445,9 +1474,24 @@ function showCardPreview(trigger) {
   const source = card?.dataset.previewSrc;
   if (!source) return;
   activePreviewCard = card;
-  previewImage.src = source;
   previewImage.alt = card.dataset.previewName || '';
   previewName.textContent = card.dataset.previewName || '';
+  // Show the small art immediately (it is already on the page and hot), then swap in
+  // the large art once it has finished loading, so the preview never hangs blank.
+  const small = card.querySelector('img')?.src || '';
+  const cached = previewImageCache.get(source);
+  if (cached) {
+    previewImage.src = cached.src;
+  } else if (small) {
+    previewImage.src = small;
+    const img = new Image();
+    img.onload = () => {
+      if (activePreviewCard === card) previewImage.src = source;
+      previewImageCache.set(source, img);
+    };
+    img.onerror = () => previewImageCache.delete(source);
+    img.src = source;
+  }
   preview.hidden = false;
   requestAnimationFrame(() => positionCardPreview(trigger));
 }
