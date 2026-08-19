@@ -33,7 +33,7 @@ type BuildCandidate struct {
 type BuildSuggestRequest struct {
 	Commander string   `json:"commander"`
 	Chosen    []string `json:"chosen"` // card names already added to the draft
-	Seen      []string `json:"seen"`   // card names already shown (chosen or skipped)
+	Seen      []string `json:"seen"`   // card names shown (but not chosen) in the last two refreshes
 	Count     int      `json:"count"`
 }
 
@@ -150,9 +150,10 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 	}
 	chosen[normalizeCardName(commander.Name)] = struct{}{}
 
-	// Everything already chosen this session is excluded, so a re-draw never re-offers
-	// a card the user has picked. `seen` is a leftover client-side notion from the old
-	// role-balanced flow and is no longer honored: the only criterion is "not chosen".
+	// `seen` is the front-end's sliding window of cards shown (but not chosen) over
+	// the last two refreshes. We prefer not to re-offer them so a "换一批" doesn't
+	// bounce the same cards straight back, but it is a soft constraint: when the
+	// seen-aware draw is too short we relax it (chosen remains a hard exclusion).
 	seen := map[string]struct{}{}
 	for _, name := range request.Seen {
 		seen[normalizeCardName(name)] = struct{}{}
@@ -173,29 +174,36 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 		a.buildPoolCache.set(cacheKey, pool, time.Now())
 	}
 
-	// Re-filter the cached pool to drop already-chosen cards only.
-	var filtered []edhrecPoolCard
+	// Base draw pool: everything not chosen (chosen cards are never re-offered).
+	base := make([]edhrecPoolCard, 0, len(pool))
 	for _, item := range pool {
-		key := normalizeCardName(item.name)
-		if _, used := chosen[key]; used {
+		if _, used := chosen[normalizeCardName(item.name)]; used {
 			continue
 		}
-		filtered = append(filtered, item)
+		base = append(base, item)
 	}
 
-	// When the EDHREC pool is too small to keep offering fresh cards (a shallow
-	// commander page that only yields ~20 unique legal cards), top it up with
-	// Scryfall cards in the commander's colors so the draft can keep growing.
-	if len(filtered) < count {
-		backfill := a.scryfallBackfill(ctx, commander, commanderIdentity, chosen, count-len(filtered))
-		filtered = append(filtered, backfill...)
+	// Prefer a hand that avoids cards seen in the last two refreshes.
+	fresh := filterOutSeen(base, seen)
+
+	// When the seen window leaves us short, top the pool up with a 200-card batch
+	// from Scryfall (not cached) and retry the seen-aware draw before relaxing it.
+	if len(fresh) < count {
+		extra := a.scryfallBackfill(ctx, commander, commanderIdentity, chosen, 200)
+		base, fresh = mergeFresh(base, fresh, extra, seen)
 	}
 
-	// Draw `count` cards uniformly at random. The builder no longer ranks by gap-fill
-	// or synergy and no longer spreads roles; every refresh is just a random hand from
-	// whatever remains in the pool (chosen cards already removed), with no ordering
-	// relationship between the cards in a batch.
-	selected := a.randomSelection(filtered, count)
+	// Draw `count` cards uniformly at random. Cards in a batch have no ordering or
+	// role relationship; the only constraints are "not chosen" and, where possible,
+	// "not seen in the last two refreshes".
+	var selected []edhrecPoolCard
+	if len(fresh) >= count {
+		selected = a.randomSelection(fresh, count)
+	} else {
+		// Still short after the top-up: relax the seen window and draw from the full
+		// non-chosen pool (which may itself be smaller than `count`).
+		selected = a.randomSelection(base, count)
+	}
 
 	candidates := make([]BuildCandidate, 0, len(selected))
 	for _, item := range selected {
@@ -296,6 +304,44 @@ func (a *Analyzer) randomSelection(pool []edhrecPoolCard, count int) []edhrecPoo
 		selected = append(selected, pool[i])
 	}
 	return selected
+}
+
+// filterOutSeen returns the subset of pool whose normalized name is not in the seen
+// window. This is the soft "don't repeat within two refreshes" constraint.
+func filterOutSeen(pool []edhrecPoolCard, seen map[string]struct{}) []edhrecPoolCard {
+	if len(seen) == 0 {
+		return pool
+	}
+	out := make([]edhrecPoolCard, 0, len(pool))
+	for _, item := range pool {
+		if _, shown := seen[normalizeCardName(item.name)]; shown {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// mergeFresh folds a fresh Scryfall batch into the base pool and recomputes the
+// seen-filtered view. It dedupes against both the existing base and the already
+// filtered fresh list, then returns the updated (base, fresh) pair.
+func mergeFresh(base, fresh []edhrecPoolCard, extra []edhrecPoolCard, seen map[string]struct{}) ([]edhrecPoolCard, []edhrecPoolCard) {
+	existing := make(map[string]struct{}, len(base))
+	for _, item := range base {
+		existing[normalizeCardName(item.name)] = struct{}{}
+	}
+	for _, item := range extra {
+		key := normalizeCardName(item.name)
+		if _, dup := existing[key]; dup {
+			continue
+		}
+		existing[key] = struct{}{}
+		base = append(base, item)
+		if _, shown := seen[key]; !shown {
+			fresh = append(fresh, item)
+		}
+	}
+	return base, fresh
 }
 
 // scryfallBackfill pulls Commander-legal cards from Scryfall when the EDHREC pool is

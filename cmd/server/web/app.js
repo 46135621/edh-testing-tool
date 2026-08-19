@@ -67,6 +67,7 @@ let buildChosen = [];           // card names (lowercase) already added to the d
 let buildCards = [];            // { name, card? } resolved rows for export/analysis
 let buildColors = [];           // commander color identity (for basic-land gating)
 let buildCandidates = [];       // currently displayed 3 candidates
+let recentShown = [];           // sliding window of names shown (not chosen) in the last two refreshes
 
 const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
 const BUILD_TARGET = 100;
@@ -105,6 +106,7 @@ function openBuilder() {
   buildCards = [];
   buildColors = [];
   buildCandidates = [];
+  recentShown = [];
   builderCommanderInput.focus();
   builder.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -307,9 +309,12 @@ async function startBuild() {
     buildColors = payload.color_identity || [];
     buildChosen = [];
     buildCards = [];
+    recentShown = [];
     builderWorkflow.hidden = false;
     builderComplete.hidden = true;
-    applyBuildCandidates(Array.isArray(payload.candidates) ? payload.candidates : []);
+    const first = Array.isArray(payload.candidates) ? payload.candidates : [];
+    rememberShown(first);
+    applyBuildCandidates(first);
     renderBuilderSidebar();
   } catch (error) {
     builderMessage.textContent = error.message || '加载失败，请重试。';
@@ -356,23 +361,44 @@ function buildMetricLabel(id) {
 
 async function nextBuildBatch() {
   if (!buildCommander) return;
-  // Every refresh draws a fresh random hand straight from the server. There is no
-  // local "seen" tracking or role ordering anymore: the only exclusion criterion is
-  // "already chosen", so skipped cards are immediately eligible to reappear.
+  // Every refresh draws a fresh random hand straight from the server. Cards shown
+  // (but not chosen) in the last two refreshes are sent as `seen` so the server can
+  // avoid bouncing them straight back; chosen cards remain permanently excluded.
   builderCandidates.innerHTML = '<p class="editor-empty">正在换一批…</p>';
   try {
     const response = await fetch('/api/v1/build-suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commander: buildCommander, chosen: buildChosen, seen: [], count: 3 })
+      body: JSON.stringify({ commander: buildCommander, chosen: buildChosen, seen: recentShown, count: 3 })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error?.message || '无法加载建议。');
     const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+    rememberShown(candidates);
     applyBuildCandidates(candidates);
   } catch (error) {
     builderCandidates.innerHTML = `<p class="form-message">${escapeHTML(error.message || '加载失败')}</p>`;
   }
+}
+
+// Record the cards just shown (only the ones not chosen yet) into a two-refresh
+// sliding window, so the next two draws avoid re-offering them. We track by the
+// normalized name; duplicates are collapsed.
+function rememberShown(candidates) {
+  const current = candidates.map((c) => normalizeBuildName(c.name)).filter(Boolean);
+  recentShown = recentShown.concat(current);
+  // Keep only the most recent two refreshes (up to 6 unique-ish entries).
+  const windowSize = 6;
+  const seen = new Set();
+  const next = [];
+  for (let i = recentShown.length - 1; i >= 0 && next.length < windowSize; i--) {
+    const key = recentShown[i];
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      next.unshift(key);
+    }
+  }
+  recentShown = next;
 }
 
 // Normalize a card name to its front-face, lowercased form so split cards

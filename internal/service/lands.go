@@ -153,7 +153,7 @@ func (a *Analyzer) BuildLands(ctx context.Context, categoryID string, commanderI
 	if categoryID == "fetch" {
 		for _, land := range fetchLands {
 			fetchColors := []string{basicTypeColor(land.FetchesA), basicTypeColor(land.FetchesB)}
-			if !colorsAllowed(fetchColors, identity) {
+			if !anyColorAllowed(fetchColors, identity) {
 				continue
 			}
 			names = append(names, land.Name)
@@ -185,19 +185,31 @@ func (a *Analyzer) BuildLands(ctx context.Context, categoryID string, commanderI
 func colorLetters(compact string) []string {
 	order := []byte{'W', 'U', 'B', 'R', 'G'}
 	seen := make(map[byte]struct{}, len(compact))
-	out := make([]string, 0, len(compact))
 	for _, needed := range compact {
 		if _, ok := seen[byte(needed)]; ok {
 			continue
 		}
 		seen[byte(needed)] = struct{}{}
 	}
+	out := make([]string, 0, len(compact))
 	for _, color := range order {
 		if _, ok := seen[color]; ok {
 			out = append(out, string(color))
 		}
 	}
 	return out
+}
+
+// anyColorAllowed reports whether at least one color in `colors` is inside `allowed`.
+// Used for off-color fetch lands: a fetch is legal in a commander's identity if
+// either basic-land type it fetches is in the identity, even when the other is not.
+func anyColorAllowed(colors []string, allowed map[string]struct{}) bool {
+	for _, color := range colors {
+		if _, ok := allowed[color]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // basicTypeColor maps a basic-land type back to the color it represents for fetch
