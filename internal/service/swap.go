@@ -13,14 +13,15 @@ import (
 )
 
 var (
-	ErrRemoveCardNotFound = errors.New("remove card not found in mainboard")
-	ErrCommanderSwap      = errors.New("commander replacement is not supported")
-	ErrAddCardNotFound    = errors.New("added card was not found")
-	ErrIllegalAddedCard   = errors.New("added card is not commander legal")
-	ErrColorIdentity      = errors.New("added card is outside the commander color identity")
-	ErrSingleton          = errors.New("added card would violate singleton rules")
-	ErrSameCard           = errors.New("added and removed cards must differ")
-	ErrCardData           = errors.New("card data is incomplete")
+	ErrRemoveCardNotFound  = errors.New("remove card not found in mainboard")
+	ErrCommanderSwap       = errors.New("commander replacement is not supported")
+	ErrAddCardNotFound     = errors.New("added card was not found")
+	ErrIllegalAddedCard    = errors.New("added card is not commander legal")
+	ErrColorIdentity       = errors.New("added card is outside the commander color identity")
+	ErrSingleton           = errors.New("added card would violate singleton rules")
+	ErrSameCard            = errors.New("added and removed cards must differ")
+	ErrCardData            = errors.New("card data is incomplete")
+	errUnknownLandCategory = errors.New("unknown land category")
 )
 
 type SwapCard struct {

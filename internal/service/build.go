@@ -326,6 +326,12 @@ func (a *Analyzer) buildPool(ctx context.Context, groups []edhrec.Group, command
 			if !colorsAllowed(card.ColorIdentity, commanderIdentity) {
 				continue
 			}
+			if isBasicLandType(card) {
+				continue
+			}
+			if isNonDeckCardType(card) {
+				continue
+			}
 			seen[key] = struct{}{}
 			pool = append(pool, edhrecPoolCard{name: card.Name, synergy: rec.Synergy, inclusion: rec.InclusionRate, source: rec.SourceURL, card: card})
 		}

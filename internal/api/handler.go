@@ -41,6 +41,12 @@ type compareSwapRequest struct {
 	AddName    string `json:"add_name"`
 }
 
+type buildLandsRequest struct {
+	Commander     string   `json:"commander"`
+	Category      string   `json:"category"`
+	ColorIdentity []string `json:"color_identity"`
+}
+
 type errorResponse struct {
 	Error struct {
 		Code    string `json:"code"`
@@ -56,6 +62,7 @@ func NewHandler(analyzer *service.Analyzer, logger *slog.Logger, requestTimeout 
 	mux.HandleFunc("POST /api/v1/compare-swap", handler.compareSwap)
 	mux.HandleFunc("GET /api/v1/card", handler.lookupCard)
 	mux.HandleFunc("POST /api/v1/build-suggest", handler.buildSuggest)
+	mux.HandleFunc("POST /api/v1/build-lands", handler.buildLands)
 	mux.Handle("GET /", static)
 	return securityHeaders(requestLogger(logger, mux))
 }
@@ -194,6 +201,44 @@ func (h *Handler) buildSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) buildLands(w http.ResponseWriter, r *http.Request) {
+	body := http.MaxBytesReader(w, r.Body, 64<<10)
+	defer body.Close()
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	var request buildLandsRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "请求体必须是有效的地牌 JSON。")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "请求体只能包含一个 JSON 对象。")
+		return
+	}
+	if strings.TrimSpace(request.Category) == "" {
+		writeError(w, http.StatusBadRequest, "LAND_CATEGORY_REQUIRED", "请指定地牌类别。")
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, h.requestTimeout)
+	defer cancel()
+	response, err := h.analyzer.BuildLands(ctx, request.Category, request.ColorIdentity)
+	if err != nil {
+		status, code, message := buildLandsError(err)
+		writeError(w, status, code, message)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func buildLandsError(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, service.ErrCardData), strings.Contains(err.Error(), "unknown land category"):
+		return http.StatusBadRequest, "LAND_CATEGORY_REQUIRED", "未知的地牌类别。"
+	default:
+		return http.StatusBadGateway, "LANDS_FAILED", "暂时无法加载地牌。"
+	}
 }
 
 func buildSuggestError(err error) (int, string, string) {

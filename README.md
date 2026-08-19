@@ -31,7 +31,7 @@ Windows 用户把仓库 clone 下来后，直接双击根目录的 `start.cmd` �
 go run ./cmd/server
 ```
 
-打开 <http://localhost:8080>。
+打开 <http://localhost:18781>。
 
 开发时推荐使用重启脚本。它会先构建新版本；构建成功后，只终止由该脚本记录并验证过的旧服务进程，再启动新服务并等待健康检查通过：
 
@@ -51,7 +51,7 @@ BROWSER_PATH=/usr/bin/chromium go run ./cmd/server
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `APP_ADDRESS` | `:8080` | 监听地址 |
+| `APP_ADDRESS` | `:18781` | 监听地址 |
 | `REQUEST_TIMEOUT` | `90s` | 整体请求超时 |
 | `PROVIDER_TIMEOUT` | `60s` | 单个第三方分析超时 |
 | `CACHE_TTL` | `30m` | 完整分析结果缓存时间 |

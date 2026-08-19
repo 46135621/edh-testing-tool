@@ -258,6 +258,19 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .builder-basics-label { color: var(--muted); font-size: 12px; }
 .builder-basics button { width: 34px; height: 34px; border: 1px solid #555a50; border-radius: 50%; color: var(--ink); background: #1a1c18; font-weight: 800; }
 .builder-basics button:hover { border-color: var(--acid); color: var(--acid); }
+.builder-lands-panel { border: 1px solid var(--line); background: #171a15; border-radius: 10px; padding: 16px; margin-top: 14px; }
+.builder-lands-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.builder-lands-head strong { font-size: 15px; }
+.builder-lands-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.builder-land-category { display: grid; gap: 5px; padding: 14px; text-align: left; border: 1px solid var(--line); background: #1a1c18; color: var(--ink); border-radius: 8px; cursor: pointer; }
+.builder-land-category:hover { border-color: var(--acid); }
+.builder-land-category strong { font-size: 14px; }
+.builder-lands-result { margin-top: 14px; }
+.builder-lands-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; }
+.builder-land-card { display: grid; gap: 6px; padding: 8px; text-align: center; border: 1px solid var(--line); background: #1a1c18; color: var(--ink); border-radius: 8px; cursor: pointer; transition: border-color .15s, transform .15s; }
+.builder-land-card:hover { border-color: var(--acid); transform: translateY(-2px); }
+.builder-land-card img { width: 100%; aspect-ratio: 63 / 88; object-fit: cover; border-radius: 6px; background: #14150f; }
+.builder-land-card span { font-size: 11px; line-height: 1.3; }
 .builder-sidebar { border: 1px solid var(--line); background: #1c1e1a; padding: 18px; align-self: start; position: sticky; top: 20px; }
 .builder-progress { display: flex; align-items: baseline; gap: 8px; margin-bottom: 16px; }
 .builder-progress strong { font-size: 40px; line-height: .9; letter-spacing: -.03em; color: var(--acid); }

@@ -60,8 +60,16 @@
       <div id="builder-workflow" class="builder-workflow" hidden>
         <div class="builder-main">
           <div id="builder-candidates" class="builder-candidates"></div>
+          <div id="builder-lands-panel" class="builder-lands-panel" hidden>
+            <div class="builder-lands-head">
+              <strong>一键出地</strong>
+              <button id="builder-lands-close" class="ghost-button" type="button">关闭</button>
+            </div>
+            <div id="builder-lands-grid" class="builder-lands-grid"></div>
+          </div>
           <div class="builder-actions">
             <button id="builder-skip" class="ghost-button" type="button">换一批</button>
+            <button id="builder-lands" class="ghost-button" type="button">一键出地</button>
             <span class="builder-basics">
               <span class="builder-basics-label">快速加基本地：</span>
               <button type="button" data-basic="Plains">白</button>

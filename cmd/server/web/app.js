@@ -51,6 +51,10 @@ const builderMessage = document.querySelector('#builder-message');
 const builderWorkflow = document.querySelector('#builder-workflow');
 const builderCandidates = document.querySelector('#builder-candidates');
 const builderSkip = document.querySelector('#builder-skip');
+const builderLandsButton = document.querySelector('#builder-lands');
+const builderLandsPanel = document.querySelector('#builder-lands-panel');
+const builderLandsClose = document.querySelector('#builder-lands-close');
+const builderLandsGrid = document.querySelector('#builder-lands-grid');
 const builderSidebar = document.querySelector('#builder-sidebar');
 const builderComplete = document.querySelector('#builder-complete');
 const builderExport = document.querySelector('#builder-export');
@@ -67,6 +71,19 @@ let buildCandidateBuffer = [];  // larger candidate pool fetched once, drained l
 
 const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
 const BUILD_TARGET = 100;
+
+// 一键出地的地牌分类。ID 与后端 service.LandCategories 对齐；点单类后按主将色组
+// 过滤，再渲染可加入草稿的地牌小图。
+const LAND_CATEGORIES = [
+  { id: 'shock', label: '电震' },
+  { id: 'surveil', label: '刺探' },
+  { id: 'original_dual', label: '老圈' },
+  { id: 'verge', label: '边陲' },
+  { id: 'scry', label: '占卜地' },
+  { id: 'multiplayer', label: '多人地' },
+  { id: 'fetch', label: '找地' },
+  { id: 'triome', label: '三色圈' }
+];
 
 // construction metric targets (labels mirror the server's construction.Report).
 const BUILD_METRICS = [
@@ -95,6 +112,66 @@ function openBuilder() {
 
 function closeBuilder() {
   builder.hidden = true;
+}
+
+// 一键出地：展开/收起八个地牌分类按钮。点击单个分类按主将色组请求可用地牌，
+// 渲染成可点选的小图，点某张地把它加入草稿。
+function toggleLandsPanel() {
+  const visible = !builderLandsPanel.hidden;
+  if (visible) {
+    builderLandsPanel.hidden = true;
+    return;
+  }
+  builderLandsGrid.innerHTML = LAND_CATEGORIES.map((category) => `
+    <button type="button" class="builder-land-category" data-land-category="${category.id}">
+      <strong>${category.label}</strong>
+    </button>`).join('');
+  builderLandsPanel.hidden = false;
+  builderLandsGrid.innerHTML += '<div id="builder-lands-result" class="builder-lands-result"></div>';
+}
+
+function closeLandsPanel() {
+  builderLandsPanel.hidden = true;
+}
+
+async function loadLandCategory(categoryID) {
+  const resultBox = document.querySelector('#builder-lands-result');
+  if (!resultBox) return;
+  const category = LAND_CATEGORIES.find((item) => item.id === categoryID);
+  resultBox.innerHTML = '<p class="editor-empty">正在加载地牌…</p>';
+  try {
+    const response = await fetch('/api/v1/build-lands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: categoryID, color_identity: buildColors })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error?.message || '无法加载地牌。');
+    const lands = Array.isArray(payload.lands) ? payload.lands : [];
+    if (!lands.length) {
+      resultBox.innerHTML = '<p class="editor-empty">该类别在你的主将色组内没有可用地牌。</p>';
+      return;
+    }
+    resultBox.innerHTML = `<div class="builder-lands-head"><strong>${escapeHTML(payload.category_label || category?.label || '')}</strong><small>点击地牌加入草稿</small></div>
+      <div class="builder-lands-cards">${lands.map((land) => {
+        const image = cardImage(land.card);
+        return `<button type="button" class="builder-land-card" data-land-name="${escapeHTML(land.name)}">${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(land.name)}">` : '<div class="builder-candidate-placeholder"></div>'}<span>${escapeHTML(land.name)}</span></button>`;
+      }).join('')}</div>`;
+  } catch (error) {
+    resultBox.innerHTML = `<p class="form-message">${escapeHTML(error.message || '加载失败')}</p>`;
+  }
+}
+
+function addLandCard(name) {
+  if (!name) return;
+  if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
+  buildChosen.push(normalizeBuildName(name));
+  buildCards.push({ name, card: { name, type_line: 'Land' } });
+  renderBuilderSidebar();
+  if (isBuilderComplete()) {
+    builderWorkflow.hidden = true;
+    builderComplete.hidden = false;
+  }
 }
 
 function isBuilderComplete() {
@@ -332,6 +409,8 @@ buildEntryButton.addEventListener('click', openBuilder);
 builderClose.addEventListener('click', closeBuilder);
 builderStartButton.addEventListener('click', startBuild);
 builderSkip.addEventListener('click', nextBuildBatch);
+builderLandsButton.addEventListener('click', toggleLandsPanel);
+builderLandsClose.addEventListener('click', closeLandsPanel);
 builderExport.addEventListener('click', () => downloadText('decklist.txt', builderToDeckText()));
 builderAnalyze.addEventListener('click', () => {
   decklistInput.value = builderToDeckText();
@@ -348,6 +427,16 @@ document.addEventListener('click', (event) => {
     const index = Number(candidateButton.dataset.candidate);
     const candidate = buildCandidates[index];
     if (candidate) addBuildCard(candidate);
+    return;
+  }
+  const landCategory = event.target.closest('[data-land-category]');
+  if (landCategory) {
+    loadLandCategory(landCategory.dataset.landCategory || '');
+    return;
+  }
+  const landCard = event.target.closest('[data-land-name]');
+  if (landCard) {
+    addLandCard(landCard.dataset.landName || '');
     return;
   }
   const basicButton = event.target.closest('[data-basic]');

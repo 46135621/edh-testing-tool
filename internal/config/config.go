@@ -27,7 +27,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Address:             env("APP_ADDRESS", ":8080"),
+		Address:             env("APP_ADDRESS", ":18781"),
 		RequestTimeout:      durationEnv("REQUEST_TIMEOUT", 90*time.Second),
 		ProviderTimeout:     durationEnv("PROVIDER_TIMEOUT", 60*time.Second),
 		CacheTTL:            durationEnv("CACHE_TTL", 30*time.Minute),
