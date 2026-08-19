@@ -267,6 +267,8 @@ func buildSuggestError(err error) (int, string, string) {
 		return http.StatusNotFound, "COMMANDER_NOT_FOUND", "找不到该主将，请检查名称拼写。"
 	case errors.Is(err, service.ErrCardData):
 		return http.StatusBadGateway, "CARD_DATA_UNAVAILABLE", "卡牌资料不完整，暂时无法生成建议。"
+	case errors.Is(err, service.ErrBuildBackfill):
+		return http.StatusBadGateway, "BUILD_POOL_EXHAUSTED", "候选卡池暂时用尽，无法补充更多牌，请稍后重试。"
 	default:
 		if strings.Contains(err.Error(), "legal as a Commander") {
 			return http.StatusBadRequest, "COMMANDER_NOT_LEGAL", err.Error()

@@ -18,6 +18,11 @@ import (
 // resolved to a usable Scryfall card.
 var ErrBuildCommanderNotFound = errors.New("commander card was not found")
 
+// ErrBuildBackfill is returned when the builder's candidate pool is too small and
+// the Scryfall top-up could not be loaded at all. The caller surfaces this instead
+// of silently showing an empty hand.
+var ErrBuildBackfill = errors.New("could not backfill the candidate pool")
+
 // BuildCandidate is one suggested card the guided builder may offer the user.
 type BuildCandidate struct {
 	Name        string  `json:"name"`
@@ -56,6 +61,16 @@ var gapTypeQueries = map[string]string{
 	"single_interaction": "t:instant",
 	"mass_interaction":   "t:sorcery",
 }
+
+// buildBackfillLimit is how many extra cards one Scryfall top-up tries to add to the
+// pool once the EDHREC pool runs low. These results are persisted into the memoized
+// pool, so later refreshes reuse them instead of re-querying Scryfall.
+const buildBackfillLimit = 200
+
+// buildBackfillHeadroom is the minimum number of un-chosen cards we want left in the
+// pool before we ask Scryfall for more. When the pool dips below this we top it up
+// early, so the user never watches the hand shrink from three to two to one.
+const buildBackfillHeadroom = 20
 
 // edhrecPoolCache memoizes the flattened, legality/color-filtered candidate pool per
 // commander key. The EDHREC fetch and per-card Scryfall resolution are the two slow
@@ -183,26 +198,30 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 		base = append(base, item)
 	}
 
+	// Top the pool up early, before the hand starts shrinking. Scryfall results are
+	// folded into the memoized pool so the pool grows monotonically instead of being
+	// re-fetched on every refresh.
+	if len(base) < buildBackfillHeadroom {
+		extra := a.scryfallBackfill(ctx, commander, commanderIdentity, chosen, buildBackfillLimit)
+		pool, base = mergeFresh(pool, base, extra, seen)
+		a.buildPoolCache.set(cacheKey, pool, time.Now())
+	}
+
 	// Prefer a hand that avoids cards seen in the last two refreshes.
 	fresh := filterOutSeen(base, seen)
 
-	// When the seen window leaves us short, top the pool up with a 200-card batch
-	// from Scryfall (not cached) and retry the seen-aware draw before relaxing it.
-	if len(fresh) < count {
-		extra := a.scryfallBackfill(ctx, commander, commanderIdentity, chosen, 200)
-		base, fresh = mergeFresh(base, fresh, extra, seen)
-	}
-
 	// Draw `count` cards uniformly at random. Cards in a batch have no ordering or
 	// role relationship; the only constraints are "not chosen" and, where possible,
-	// "not seen in the last two refreshes".
+	// "not seen in the last two refreshes". If the pool cannot provide a full hand
+	// even after the top-up, return what is left rather than erroring.
 	var selected []edhrecPoolCard
 	if len(fresh) >= count {
 		selected = a.randomSelection(fresh, count)
 	} else {
-		// Still short after the top-up: relax the seen window and draw from the full
-		// non-chosen pool (which may itself be smaller than `count`).
 		selected = a.randomSelection(base, count)
+	}
+	if len(selected) == 0 {
+		return BuildSuggestResponse{}, ErrBuildBackfill
 	}
 
 	candidates := make([]BuildCandidate, 0, len(selected))
@@ -233,48 +252,70 @@ type edhrecPoolCard struct {
 	card      cardcatalog.Card
 }
 
-// resolveCandidate fetches a card's Scryfall payload; a lookup miss means we can't
-// gate or display it, so it is dropped from the pool (not an error for the caller).
-func (a *Analyzer) resolveCandidate(ctx context.Context, name string) (cardcatalog.Card, bool) {
-	card, err := a.LookupCard(ctx, name)
-	if err != nil || !hasUsableCardData(card) {
-		return cardcatalog.Card{}, false
-	}
-	return card, true
-}
-
 // buildPool flattens EDHREC groups into a legality/color-filtered, deduplicated pool
-// of resolved cards. It is the expensive part (network + Scryfall) and its result is
-// memoized per commander by BuildSuggest. Every dedupe key uses normalizeCardName so
-// a split card "X // Y" and its front face "X" never both survive.
+// of resolved cards. It is the expensive part (EDHREC fetch + one batched Scryfall
+// lookup) and its result is memoized per commander by BuildSuggest. All card names
+// are resolved in a single batch lookup so a page of recommendations costs a handful
+// of Scryfall requests instead of one per card. Every dedupe key uses
+// normalizeCardName so a split card "X // Y" and its front face "X" never both
+// survive.
 func (a *Analyzer) buildPool(ctx context.Context, groups []edhrec.Group, commanderIdentity map[string]struct{}) []edhrecPoolCard {
-	pool := make([]edhrecPoolCard, 0)
-	seen := map[string]struct{}{}
+	// Collect unique recommendation names first, preserving first-seen order.
+	names := make([]string, 0)
+	nameSeen := make(map[string]struct{})
+	recByName := make(map[string]edhrec.Recommendation)
 	for _, group := range groups {
 		for _, rec := range group.Cards {
 			key := normalizeCardName(rec.Name)
-			if _, dup := seen[key]; dup {
+			if key == "" {
 				continue
 			}
-			card, ok := a.resolveCandidate(ctx, rec.Name)
-			if !ok {
+			if _, dup := nameSeen[key]; dup {
 				continue
 			}
-			if card.Legalities["commander"] != "legal" {
-				continue
-			}
-			if !colorsAllowed(card.ColorIdentity, commanderIdentity) {
-				continue
-			}
-			if isBasicLandType(card) {
-				continue
-			}
-			if isNonDeckCardType(card) {
-				continue
-			}
-			seen[key] = struct{}{}
-			pool = append(pool, edhrecPoolCard{name: card.Name, synergy: rec.Synergy, inclusion: rec.InclusionRate, source: rec.SourceURL, card: card})
+			nameSeen[key] = struct{}{}
+			names = append(names, rec.Name)
+			recByName[key] = rec
 		}
+	}
+
+	catalog, err := a.cards.Lookup(ctx, names)
+	if err != nil {
+		return nil
+	}
+
+	pool := make([]edhrecPoolCard, 0, len(names))
+	for _, name := range names {
+		key := normalizeCardName(name)
+		rec := recByName[key]
+		card, ok := catalog[strings.ToLower(strings.TrimSpace(name))]
+		if !ok {
+			// The batch lookup keys by lowercased full name; a split/DFC card whose
+			// front face was used as the query still resolves via the catalog's alias
+			// entries, so also try the normalized front-face key.
+			for k, v := range catalog {
+				if normalizeCardName(k) == key {
+					card, ok = v, true
+					break
+				}
+			}
+		}
+		if !ok || !hasUsableCardData(card) {
+			continue
+		}
+		if card.Legalities["commander"] != "legal" {
+			continue
+		}
+		if !colorsAllowed(card.ColorIdentity, commanderIdentity) {
+			continue
+		}
+		if isBasicLandType(card) {
+			continue
+		}
+		if isNonDeckCardType(card) {
+			continue
+		}
+		pool = append(pool, edhrecPoolCard{name: card.Name, synergy: rec.Synergy, inclusion: rec.InclusionRate, source: rec.SourceURL, card: card})
 	}
 	return pool
 }
@@ -374,7 +415,12 @@ func (a *Analyzer) scryfallBackfill(ctx context.Context, commander cardcatalog.C
 		// types, and already-chosen cards while still filling the request.
 		cards, err := a.cards.Search(ctx, q, 700)
 		if err != nil {
-			continue // one gap's search failing should not abort the whole backfill
+			// One transient Scryfall failure should not abort the whole backfill;
+			// retry once before moving on to the next gap query.
+			cards, err = a.cards.Search(ctx, q, 700)
+			if err != nil {
+				continue
+			}
 		}
 		for _, card := range cards {
 			key := normalizeCardName(card.Name)
