@@ -1,6 +1,17 @@
 # Commander Power Check
 
-输入公开的 Moxfield Commander 牌组 URL 或粘贴牌表文本，同时查询 CommanderSalt 与 EDH Power Level 的评分，并给出构筑缺口推荐与轻量组牌工具。
+输入公开的 Moxfield Commander 牌组 URL 或粘贴牌表文本，同时查询 CommanderSalt 与 EDH Power Level 的评分，并给出构筑缺口推荐与一套引导式组牌工具。
+
+## 功能
+
+- **双评分独立展示**：CommanderSalt 与 EDH Power Level 分别给出 Bracket（规则值 / 评估值）与 Power Level，不计算平均值。EDH Power Level 判定还会列出 Game Changers、早期 2-Card Combo、Extra Turns、Mass Land Denial 的具体数量与依据。
+- **构筑概览与缺口报告**：按正向法力、计划相关、群体干扰、单体干扰、牌差件、加速六类统计当前数量与目标缺口。
+- **构筑缺口推荐**：只推荐能补足当前短缺类别的单卡，并说明每张卡的填补理由。
+- **法术力基础分析**：基于 Frank Karsten 的地张数回归与条件超几何模型，按颜色拆解地牌供给是否够。
+- **引导式组牌器**：没有牌时输入主将名称开始，逐轮三选一；支持一键出地、常用加速单卡与「可用的 Game Changer」快捷添加、快速加基本地、已选牌移除与导出。
+- **单卡替换预览**：选择一张移除牌与一张加入牌，对比替换前后的构筑指标、牌张数与基础合法性，不修改 Moxfield、不保存版本。
+- **轻量牌表编辑器**：增删卡牌、撤销/重做、保存版本与导出牌表文本。
+- **卡图与关联数据**：Scryfall 卡图（含双面牌正反面切换）、Commander Spellbook 组合、EDHREC 推荐。
 
 ## 给客户：直接下载客户端
 
@@ -32,14 +43,6 @@ go run ./cmd/server
 BROWSER_PATH=/usr/bin/chromium go run ./cmd/server
 ```
 
-开发时可用重启脚本：先构建新版本，构建成功后只终止由该脚本记录并验证过的旧进程，再启动新进程并等待健康检查通过，不会按端口或进程名误杀其他程序。
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\restart.ps1
-```
-
-进程状态记录在 `.run/powerlevel.pid`，日志在 `.run/powerlevel.log` 与 `.run/powerlevel.error.log`。直接用 `go run` 启动的旧进程不受脚本管理，第一次需手动停掉，之后统一用重启脚本即可。
-
 ## 构建桌面客户端
 
 单文件客户端通过 Tauri 构建，内置服务端二进制由 `include_bytes!` 编译进 exe：
@@ -49,33 +52,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-client.ps1
 ```
 
 需要本机装有 Rust（`cargo`）与 Go。产物在 `src-tauri\target\release\edh-powerlevel-client.exe`。CI 的 `.github/workflows/release.yml` 会自动完成同样的构建并发布到 Releases，正常交付不必在本地手动构建。
-
-## 配置
-
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `APP_ADDRESS` | `:18781` | 监听地址 |
-| `REQUEST_TIMEOUT` | `90s` | 整体请求超时 |
-| `PROVIDER_TIMEOUT` | `60s` | 单个第三方分析超时 |
-| `CACHE_TTL` | `30m` | 完整分析结果缓存时间 |
-| `PARTIAL_CACHE_TTL` | `45s` | 第三方部分失败结果的短缓存时间 |
-| `CACHE_MAX_ENTRIES` | `500` | TTL/LRU 结果缓存容量 |
-| `EDH_MAX_CONCURRENCY` | `2` | 同时执行的 EDH 浏览器分析上限 |
-| `COMMANDERSALT_API_URL` | `https://api.commandersalt.com` | CommanderSalt API 地址 |
-| `EDH_PAGE_URL` | `https://edhpowerlevel.com/` | EDH Power Level 页面地址 |
-| `BROWSER_PATH` | 自动查找 | Chrome/Chromium/Edge 可执行文件 |
-| `BROWSER_HEADLESS` | `true` | 是否使用无头浏览器 |
-
-## API
-
-```http
-POST /api/v1/analyze
-Content-Type: application/json
-
-{"url":"https://moxfield.com/decks/<deck-id>"}
-```
-
-健康检查：`GET /healthz`。
 
 ## 测试
 
