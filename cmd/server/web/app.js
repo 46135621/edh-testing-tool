@@ -1030,7 +1030,7 @@ function renderManabase(manabase) {
   let composition = '';
   if (Object.keys(typeLines).length) {
     composition = `
-      <div class="manabase-table-heading"><span>法术力构成</span><small>按卡牌类别（非地牌）</small></div>
+      <div class="manabase-table-heading"><span>法术力构成</span><small>按卡牌类别（非地牌 · 含主将）</small></div>
       <div class="manabase-table">${Object.entries(typeLines).map(([type, count]) => `
         <div class="manabase-table-row"><span>${escapeHTML(type)}</span><strong>${Number(count) || 0}</strong></div>`).join('')}</div>`;
   }
@@ -1047,7 +1047,7 @@ function renderManabase(manabase) {
       </div>`;
     }).join('');
     return `
-      <div class="manabase-table-heading"><span>法术力曲线</span><small>非地牌 · 非加速/法术力来源</small></div>
+      <div class="manabase-table-heading"><span>法术力曲线</span><small>非地牌 · 含主将与加速物</small></div>
       <div class="manabase-curve">${rows}</div>`;
   })() : '';
 

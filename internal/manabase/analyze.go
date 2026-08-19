@@ -45,17 +45,16 @@ func Analyze(entries []ClassifyEntry) Report {
 	return report
 }
 
-// buildCostCounts tallies the non-land, non-commander cards by their mana value so
-// the front-end can draw the mana curve. Mana values are floored to an integer bucket
-// (a 1.5-MV card lands in the 1 slot) and values of 7 or higher are collapsed into a
-// single "7+" bucket so the table stays compact. Each spell's deck quantity is added,
-// so basic lands (which never enter Spells) stay out while 2× of a spell counts twice.
+// buildCostCounts tallies the non-land cards by their mana value so the front-end can
+// draw the mana curve. Mana values are floored to an integer bucket (a 1.5-MV card
+// lands in the 1 slot) and values of 7 or higher are collapsed into a single "7+" bucket
+// so the table stays compact. Commanders and mana sources (rocks/dorks) are included —
+// the curve is meant to show where the deck's total mana demand sits. Each spell's deck
+// quantity is added, so basic lands (which never enter Spells) stay out while 2× of a
+// spell counts twice.
 func buildCostCounts(deck ManabaseDeck) []CostCount {
 	buckets := make([]int, 8)
 	for _, card := range deck.Spells {
-		if card.IsCommander || card.IsManaSource {
-			continue
-		}
 		mv := card.ManaValue
 		if mv < 0 {
 			mv = 0
@@ -76,15 +75,13 @@ func buildCostCounts(deck ManabaseDeck) []CostCount {
 	return counts
 }
 
-// buildCardTypeCounts tallies non-land, non-commander cards by their broad spell/
-// permanent type for the "法术力构成" table. `entries` are the original resolved deck
-// cards (with type lines) so we can classify types the SpellRequirement list dropped.
+// buildCardTypeCounts tallies non-land cards by their broad spell/permanent type for
+// the "法术力构成" table. `entries` are the original resolved deck cards (with type
+// lines) so we can classify types the SpellRequirement list dropped. Commanders are
+// included, so the composition matches the full non-land portion of the deck.
 func buildCardTypeCounts(deck ManabaseDeck, entries []ClassifyEntry) map[string]int {
 	counts := make(map[string]int)
 	for _, entry := range entries {
-		if entry.IsCommander {
-			continue
-		}
 		typeLine := strings.ToLower(entry.Card.TypeLine)
 		if strings.Contains(typeLine, "land") {
 			continue
