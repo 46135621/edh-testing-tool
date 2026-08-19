@@ -384,6 +384,7 @@ func addSpellRequirement(deck *ManabaseDeck, card CardFact, cost ParsedManaCost)
 		IsGold:       distinctColors(cost.Pips) >= 2,
 		IsManaSource: isRockOrDork(card),
 		IsCommander:  card.IsCommander,
+		Quantity:     card.Quantity,
 	})
 }
 

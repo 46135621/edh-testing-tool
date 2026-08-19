@@ -88,13 +88,21 @@ if (-not (Test-Path $binaryPath -PathType Leaf)) {
     }
 }
 
-$process = Start-Process -FilePath $binaryPath `
-    -WorkingDirectory $projectRoot `
-    -RedirectStandardOutput $logFile `
-    -RedirectStandardError $errorLogFile `
-    -PassThru `
-    -WindowStyle Hidden `
-    -Environment @{ POWERLEVEL_OPEN_BROWSER = "0" }
+# PowerShell 5.1 lacks `Start-Process -Environment`, so we set the variable in the
+# current scope and let the child inherit it. POWERLEVEL_OPEN_BROWSER=0 keeps the
+# server from popping the browser itself; the launcher opens it once healthy.
+$previousOpenBrowser = $env:POWERLEVEL_OPEN_BROWSER
+$env:POWERLEVEL_OPEN_BROWSER = "0"
+try {
+    $process = Start-Process -FilePath $binaryPath `
+        -WorkingDirectory $projectRoot `
+        -RedirectStandardOutput $logFile `
+        -RedirectStandardError $errorLogFile `
+        -PassThru `
+        -WindowStyle Hidden
+} finally {
+    $env:POWERLEVEL_OPEN_BROWSER = $previousOpenBrowser
+}
 Set-Content -Path $pidFile -Value $process.Id -NoNewline
 
 $deadline = (Get-Date).AddSeconds(35)

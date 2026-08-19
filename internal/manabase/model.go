@@ -48,6 +48,9 @@ type SpellRequirement struct {
 
 	// IsCommander marks the deck's commander (pinned to the top of any listing).
 	IsCommander bool
+
+	// Quantity is copies of this spell in the deck (used by the mana curve).
+	Quantity int
 }
 
 // ManabaseDeck is a fully classified deck ready for mana-base analysis: its lands,
@@ -96,6 +99,14 @@ type ColorFinding struct {
 	DrivingSpell string `json:"driving_spell"`
 }
 
+// CostCount is one bucket of the mana curve: how many non-land, non-commander cards
+// sit at a given mana value. Mana value 7 is the "7+" catch-all bucket.
+type CostCount struct {
+	ManaValue int    `json:"mana_value"`
+	Label     string `json:"label"`
+	Count     int    `json:"count"`
+}
+
 // Report is the trimmed mana-base report: land count, ramp, per-color sources, and
 // a verdict. Ported from DeckFlow.Core.Manabase.ManasourceReport.
 type Report struct {
@@ -116,6 +127,13 @@ type Report struct {
 
 	// FastMana is the 0-cost fast-mana credit input.
 	FastMana int `json:"fast_mana"`
+
+	// CostCounts is the mana curve: non-land spell counts by mana value.
+	CostCounts []CostCount `json:"cost_counts"`
+
+	// CardTypeCounts is the spell-type composition of non-land cards (creature,
+	// artifact, planeswalker, sorcery/instant, etc.), keyed by a short type label.
+	CardTypeCounts map[string]int `json:"card_type_counts"`
 
 	// ColorFindings is per-color source findings. Stage 1 keeps deck order; no
 	// composite tail-risk ordering is applied.
