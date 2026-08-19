@@ -1,17 +1,16 @@
 name: Release
 
 on:
-  # 手动触发：在 Actions 页面点 "Run workflow"，填版本号
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g. 0.1.0)'
-        required: true
-        default: '0.1.0'
-  # 打 tag 时自动触发：git tag v0.1.0 && git push origin v0.1.0
+  # 推送到 main 分支自动触发，版本号 = 提交时间
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  # 手动触发（版本号同样取最后一次提交的时间）
+  workflow_dispatch:
+
+# 防止多次 push 的构建同时进行，互相抢 Release
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write   # 用于创建 GitHub Release
@@ -29,40 +28,83 @@ jobs:
           go-version-file: go.mod   # 自动按 go.mod 里的版本装 Go
           cache: true               # 缓存依赖，加速后续构建
 
-      # 确定版本号：tag 触发时取 tag 名（去掉 v 前缀），手动触发时取输入值
-      - name: Resolve version
+      # 版本号 = HEAD 提交的时间（保留提交者时区），格式 20260818-1842
+      - name: Resolve version from commit time
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $v = $env:GITHUB_REF_NAME -replace '^v', ''
-          } else {
-            $v = '${{ inputs.version }}'
-          }
-          Write-Host "Building version: $v"
+          $v = git log -1 --date=format:'%Y%m%d-%H%M' --format=%cd
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($v)) { throw "Failed to read commit time" }
+          Write-Host "Version (commit time): $v"
           echo "VERSION=$v" >> $env:GITHUB_ENV
 
-      # 直接调用你现有的脚本
-      - name: Build release package
+      - name: Run tests
+        shell: pwsh
+        run: go test ./...
+
+      # 1) 先编译 Go 服务端（客户端要把它嵌进去，顺序不能换）
+      - name: Build server.exe
         shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version $env:VERSION
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -buildvcs=false -trimpath -ldflags "-s -w" -o server.exe ./cmd/server
+          if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 
-      # 产物总是上传为 artifact（可从 Actions 页面下载，保留 90 天）
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # runner 自带 Node.js，npm 装预编译的 CLI，比 cargo install 快得多
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+
+      # 2) 把 server.exe 放到 include_bytes! 约定的位置，再编译客户端
+      #    （客户端 exe 内嵌服务端，单文件分发）
+      - name: Build Tauri client (embeds server.exe)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path src-tauri\binaries -Force | Out-Null
+          Copy-Item server.exe src-tauri\binaries\server-x86_64-pc-windows-msvc.exe
+          Push-Location src-tauri
+          try {
+            tauri build
+            if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
+          } finally { Pop-Location }
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Copy-Item src-tauri\target\release\edh-powerlevel-client.exe .
+          foreach ($f in @("server.exe", "edh-powerlevel-client.exe")) {
+            $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content -Path "$f.sha256" -Value "$hash  $f" -Encoding ascii
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PowerLevel-windows-amd64-${{ env.VERSION }}
+          name: edh-powerlevel-${{ env.VERSION }}
           path: |
-            dist/*.zip
-            dist/*.sha256
+            server.exe
+            server.exe.sha256
+            edh-powerlevel-client.exe
+            edh-powerlevel-client.exe.sha256
           if-no-files-found: error
 
-      # 仅在 tag 触发时创建 GitHub Release 并附上 zip
+      # 创建 Release，tag 名形如 v20260818-1842
       - name: Create GitHub Release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
+          name: edh-powerlevel ${{ env.VERSION }}
           files: |
-            dist/*.zip
-            dist/*.sha256
+            server.exe
+            server.exe.sha256
+            edh-powerlevel-client.exe
+            edh-powerlevel-client.exe.sha256
           generate_release_notes: true
