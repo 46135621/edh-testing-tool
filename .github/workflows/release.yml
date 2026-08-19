@@ -81,24 +81,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
           } finally { Pop-Location }
 
-      - name: Checksums
-        shell: pwsh
-        run: |
-          Copy-Item src-tauri\target\release\edh-powerlevel-client.exe .
-          foreach ($f in @("server.exe", "edh-powerlevel-client.exe")) {
-            $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant()
-            Set-Content -Path "$f.sha256" -Value "$hash  $f" -Encoding ascii
-          }
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-files
           path: |
             server.exe
-            server.exe.sha256
-            edh-powerlevel-client.exe
-            edh-powerlevel-client.exe.sha256
+            src-tauri/target/release/edh-testing-tool-client.exe
           if-no-files-found: error
 
   build-macos:
@@ -142,12 +131,9 @@ jobs:
           cd src-tauri
           tauri build --config '{ "bundle": { "active": true, "targets": ["app"] } }'
 
-      - name: Package & checksums
+      - name: Package .app as zip
         run: |
-          ditto -c -k --sequesterRsrc "src-tauri/target/release/bundle/macos/EDH Power Level.app" "EDHPowerLevel-macos-arm64.zip"
-          for f in server-darwin-arm64 server-darwin-amd64 EDHPowerLevel-macos-arm64.zip; do
-            shasum -a 256 "$f" > "$f.sha256"
-          done
+          ditto -c -k --sequesterRsrc "src-tauri/target/release/bundle/macos/edh-testing-tool.app" "edh-testing-tool-macos-arm64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -155,11 +141,8 @@ jobs:
           name: macos-files
           path: |
             server-darwin-arm64
-            server-darwin-arm64.sha256
             server-darwin-amd64
-            server-darwin-amd64.sha256
-            EDHPowerLevel-macos-arm64.zip
-            EDHPowerLevel-macos-arm64.zip.sha256
+            edh-testing-tool-macos-arm64.zip
           if-no-files-found: error
 
   # 两个平台的产物汇总到同一个 Release
@@ -178,6 +161,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version.outputs.version }}
-          name: edh-powerlevel ${{ needs.version.outputs.version }}
+          name: edh-testing-tool ${{ needs.version.outputs.version }}
           files: dist/*
           generate_release_notes: true

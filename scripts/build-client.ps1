@@ -35,7 +35,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "单文件客户端: src-tauri\target\release\edh-powerlevel-client.exe"
+    Write-Host "单文件客户端: src-tauri\target\release\edh-testing-tool-client.exe"
 } finally {
     Pop-Location
 }

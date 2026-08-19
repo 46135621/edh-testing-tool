@@ -59,7 +59,7 @@ fn extract_server() -> std::io::Result<PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("EDHPowerLevel").join("runtime");
+    let dir = base.join("edh-testing-tool").join("runtime");
     fs::create_dir_all(&dir)?;
 
     let exe = dir.join(if cfg!(windows) { "server.exe" } else { "server" });
@@ -121,7 +121,7 @@ fn main() {
             let url: tauri::Url = format!("http://127.0.0.1:{port}").parse().unwrap();
             let local_origin = format!("http://127.0.0.1:{port}");
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-                .title("EDH Power Level")
+                .title("edh-testing-tool")
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(960.0, 640.0)
                 .on_navigation(move |url| {
