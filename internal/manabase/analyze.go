@@ -2,6 +2,8 @@ package manabase
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 
 	"powerlevel/internal/providers/cardcatalog"
 )
@@ -36,9 +38,75 @@ func Analyze(entries []ClassifyEntry) Report {
 		AverageManaValue:      deck.AverageManaValue,
 		RampAndDrawUnderThree: deck.RampAndDrawUnderThree,
 		FastMana:              deck.FastMana,
+		CostCounts:            buildCostCounts(deck),
+		CardTypeCounts:        buildCardTypeCounts(deck, entries),
 		ColorFindings:         buildColorFindings(deck, deckSize),
 	}
 	return report
+}
+
+// buildCostCounts tallies the non-land, non-commander cards by their mana value so
+// the front-end can draw the mana curve. Mana values are floored to an integer bucket
+// (a 1.5-MV card lands in the 1 slot) and values of 7 or higher are collapsed into a
+// single "7+" bucket so the table stays compact. Each spell's deck quantity is added,
+// so basic lands (which never enter Spells) stay out while 2× of a spell counts twice.
+func buildCostCounts(deck ManabaseDeck) []CostCount {
+	buckets := make([]int, 8)
+	for _, card := range deck.Spells {
+		if card.IsCommander || card.IsManaSource {
+			continue
+		}
+		mv := card.ManaValue
+		if mv < 0 {
+			mv = 0
+		}
+		if mv >= 7 {
+			mv = 7
+		}
+		buckets[mv] += card.Quantity
+	}
+	counts := make([]CostCount, 0, len(buckets))
+	for mv, count := range buckets {
+		label := strconv.Itoa(mv)
+		if mv == 7 {
+			label = "7+"
+		}
+		counts = append(counts, CostCount{ManaValue: mv, Label: label, Count: count})
+	}
+	return counts
+}
+
+// buildCardTypeCounts tallies non-land, non-commander cards by their broad spell/
+// permanent type for the "法术力构成" table. `entries` are the original resolved deck
+// cards (with type lines) so we can classify types the SpellRequirement list dropped.
+func buildCardTypeCounts(deck ManabaseDeck, entries []ClassifyEntry) map[string]int {
+	counts := make(map[string]int)
+	for _, entry := range entries {
+		if entry.IsCommander {
+			continue
+		}
+		typeLine := strings.ToLower(entry.Card.TypeLine)
+		if strings.Contains(typeLine, "land") {
+			continue
+		}
+		switch {
+		case strings.Contains(typeLine, "creature"):
+			counts["生物"] += entry.Quantity
+		case strings.Contains(typeLine, "planeswalker"):
+			counts["鹏洛客"] += entry.Quantity
+		case strings.Contains(typeLine, "artifact"):
+			counts["神器"] += entry.Quantity
+		case strings.Contains(typeLine, "enchantment"):
+			counts["结界"] += entry.Quantity
+		case strings.Contains(typeLine, "instant"):
+			counts["瞬间"] += entry.Quantity
+		case strings.Contains(typeLine, "sorcery"):
+			counts["法术"] += entry.Quantity
+		default:
+			counts["其他"] += entry.Quantity
+		}
+	}
+	return counts
 }
 
 // buildColorFindings computes a per-color source requirement for each color that the

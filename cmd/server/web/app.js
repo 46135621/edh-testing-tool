@@ -820,6 +820,23 @@ document.addEventListener('click', (event) => {
   const collapsed = group.classList.toggle('is-collapsed');
   toggle.setAttribute('aria-expanded', String(!collapsed));
 });
+
+// Collapse/expand the big result sections (法术力基础 / 构筑概览 / 关联卡牌 / 构筑缺口推荐 /
+// 完整牌表). Delegated so clicking the heading or its "收起/展开" chip toggles the whole
+// section; the deck-actions inside a heading are NOT toggled by way of being sibling
+// content, so the copy/export buttons stay usable regardless.
+document.addEventListener('click', (event) => {
+  const toggle = event.target.closest('[data-section-toggle]');
+  if (!toggle) return;
+  // Ignore clicks on action buttons nested inside the header (copy decklist, etc.).
+  if (event.target.closest('[data-section-actions] button')) return;
+  const section = toggle.closest('.catalog-section');
+  if (!section) return;
+  const collapsed = section.classList.toggle('is-collapsed');
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  const chip = toggle.querySelector('.section-heading-toggle');
+  if (chip) chip.textContent = collapsed ? '展开' : '收起';
+});
 builderExport.addEventListener('click', () => downloadText('decklist.txt', builderToDeckText()));
 builderAnalyze.addEventListener('click', () => {
   decklistInput.value = builderToDeckText();
@@ -1000,12 +1017,39 @@ function renderManabase(manabase) {
   const ramp = Number(manabase.ramp_and_draw_under_three || 0);
   const fastMana = Number(manabase.fast_mana || 0);
   const findings = Array.isArray(manabase.color_findings) ? manabase.color_findings : [];
+  const costCounts = Array.isArray(manabase.cost_counts) ? manabase.cost_counts : [];
 
   const landDeltaLabel = {
     healthy: '地数充足',
     warn: '接近目标',
     short: '地数不足'
   }[deltaClass];
+
+  // 法术力构成（非地牌，含主将）：按卡牌类别统计。
+  const typeLines = (manabase.card_type_counts || {});
+  let composition = '';
+  if (Object.keys(typeLines).length) {
+    composition = `
+      <div class="manabase-table-heading"><span>法术力构成</span><small>按卡牌类别（非地牌）</small></div>
+      <div class="manabase-table">${Object.entries(typeLines).map(([type, count]) => `
+        <div class="manabase-table-row"><span>${escapeHTML(type)}</span><strong>${Number(count) || 0}</strong></div>`).join('')}</div>`;
+  }
+
+  const curveHTML = costCounts.length ? (() => {
+    const max = Math.max(1, ...costCounts.map((bucket) => Number(bucket.count) || 0));
+    const rows = costCounts.map((bucket) => {
+      const count = Number(bucket.count) || 0;
+      const pct = Math.round((count / max) * 100);
+      return `<div class="manabase-curve-row" data-mana-value="${bucket.mana_value ?? ''}">
+        <span class="manabase-curve-label">${escapeHTML(bucket.label ?? '')}</span>
+        <div class="manabase-curve-bar"><i style="height:${pct}%"></i></div>
+        <strong class="manabase-curve-count">${count}</strong>
+      </div>`;
+    }).join('');
+    return `
+      <div class="manabase-table-heading"><span>法术力曲线</span><small>非地牌 · 非加速/法术力来源</small></div>
+      <div class="manabase-curve">${rows}</div>`;
+  })() : '';
 
   container.innerHTML = `
     <div class="manabase-hero">
@@ -1014,6 +1058,8 @@ function renderManabase(manabase) {
       <div class="manabase-land-stat ${deltaClass}"><span>偏差</span><strong>${deltaText}</strong><small>${landDeltaLabel}</small></div>
     </div>
     <p class="manabase-formula">平均法术力值 <strong>${avgMv}</strong> · 地牌/抽牌信用 <strong>${ramp}</strong> · 快法力 <strong>${fastMana}</strong></p>
+    ${composition}
+    ${curveHTML}
     ${findings.length ? `
       <div class="manabase-colors-heading"><span>颜色来源需求</span><small>需要 vs 当前（加权）</small></div>
       <div class="manabase-color-grid">${findings.map(renderColorFinding).join('')}</div>` : ''}`;
