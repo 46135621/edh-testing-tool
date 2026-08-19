@@ -85,7 +85,7 @@ jobs:
       # 嵌套路径会导致 release 步骤的 dist/* 匹配不到
       - name: Collect client binary
         shell: pwsh
-        run: Copy-Item src-tauri	argetelease\edh-testing-tool-client.exe .
+        run: Copy-Item src-tauri\target\release\edh-testing-tool-client.exe .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
