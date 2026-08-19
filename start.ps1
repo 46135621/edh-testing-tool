@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = $PSScriptRoot
 $runDirectory = Join-Path $projectRoot ".run"
-$binaryPath = Join-Path $projectRoot "server.exe"
+$binaryPath = Join-Path $runDirectory "powerlevel-server.exe"
 $pidFile = Join-Path $runDirectory "powerlevel.pid"
 $logFile = Join-Path $runDirectory "powerlevel.log"
 $errorLogFile = Join-Path $runDirectory "powerlevel.error.log"

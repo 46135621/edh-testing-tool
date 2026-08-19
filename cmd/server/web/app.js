@@ -702,8 +702,8 @@ function renderBuilderSidebar() {
   const chosenList = Array.from(byName.values())
     .sort((a, b) => String(a.name).localeCompare(String(b.name)))
     .map((entry) => `
-      <li class="builder-chosen-item">
-        <span class="builder-chosen-name">${entry.card?.game_changer ? '<span class="builder-gc-tag" title="Game Changer">GC</span>' : ''}${escapeHTML(entry.name)}</span>
+      <li class="builder-chosen-item" data-preview-src="${escapeHTML(cardPreviewImage(entry.card) || '')}" data-preview-name="${escapeHTML(entry.name)}" data-card-text="${escapeHTML(previewTextFor(entry.card))}">
+        <span class="builder-chosen-name">${entry.game_changer ? '<span class="builder-gc-tag" title="Game Changer">GC</span>' : ''}${escapeHTML(entry.name)}</span>
         <span class="builder-chosen-side">
           <strong class="builder-chosen-count">${entry.count}×</strong>
           <button type="button" class="builder-chosen-remove" data-remove-name="${escapeHTML(entry.name)}" title="移除一张" aria-label="移除 ${escapeHTML(entry.name)}">−</button>
@@ -1092,7 +1092,7 @@ function renderCombos(combos) {
   container.innerHTML = combos.map((combo) => `
     <article class="combo-card">
       <div class="combo-header"><div><span class="source-badge">COMMANDER SPELLBOOK</span><h3>${escapeHTML(combo.name)}</h3></div>${combo.source_url ? `<a href="${escapeHTML(combo.source_url)}" target="_blank" rel="noopener noreferrer">查看来源 ↗</a>` : ''}</div>
-      <div class="combo-components">${(combo.components || []).map(renderCard).join('')}</div>
+      <div class="combo-components">${(combo.components || []).map((item) => renderCard({ ...item, editor: false })).join('')}</div>
       ${combo.result ? `<p class="combo-result"><strong>结果</strong>${escapeHTML(combo.result)}</p>` : ''}
       ${combo.steps?.length ? `<details><summary>执行步骤</summary><ol>${combo.steps.map((step) => `<li>${escapeHTML(step)}</li>`).join('')}</ol></details>` : ''}
     </article>`).join('');
@@ -1109,7 +1109,7 @@ function renderRecommendations(recommendations, keywords) {
       <div class="recommendation-row">${(group.cards || []).map((item) => {
         const fills = (item.fills || []).map((fill) => `<li><strong>${escapeHTML(fill.label)} · 还缺 ${Number(fill.gap) || 0}</strong><span>${escapeHTML(fill.reason || '')}</span></li>`).join('');
         return `<article class="recommendation-card">
-          ${renderCard({ card: item.card, quantity: 1 })}
+          ${renderCard({ card: item.card, quantity: 1, editor: false })}
           <div class="recommendation-meta">
             <div><span>Synergy</span><strong>${(Number(item.synergy || 0) * 100).toFixed(1)}%</strong></div>
             <div><span>Inclusion</span><strong>${(Number(item.inclusion_rate || 0) * 100).toFixed(1)}%</strong></div>
@@ -1372,16 +1372,15 @@ function renderCard(item) {
   const previewImage = card.image_normal || card.image_small || picturedFaces[0]?.image_normal || picturedFaces[0]?.image_small;
   const faceSwitch = picturedFaces.length > 1 ? `<div class="card-faces">${picturedFaces.map((face, index) => `<button type="button" data-face="${index}" class="${index === 0 ? 'active' : ''}" aria-pressed="${index === 0}">${index === 0 ? '正面' : '反面'}</button>`).join('')}</div>` : '';
   const faceData = picturedFaces.length > 1 ? ` data-faces="${escapeHTML(JSON.stringify(picturedFaces))}"` : '';
-  const editorControls = `<div class="card-edit-controls">
+  const editorControls = item.editor === false ? '' : `<div class="card-edit-controls">
     <button type="button" data-card-subtract="${escapeHTML(card.name || '')}" aria-label="减少 ${escapeHTML(card.name || '')}"><span aria-hidden="true">−</span></button>
     <button type="button" data-card-add="${escapeHTML(card.name || '')}" aria-label="增加 ${escapeHTML(card.name || '')}"><span aria-hidden="true">+</span></button>
   </div>`;
-  return `<details class="mtg-card"${faceData} data-preview-src="${escapeHTML(previewImage || '')}" data-preview-name="${escapeHTML(card.name || '')}">
-    <summary aria-describedby="card-preview">${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(card.name)}">` : '<div class="card-placeholder"></div>'}<span class="card-quantity">${item.quantity || 1}×</span><strong>${escapeHTML(card.name || 'Unknown card')}</strong></summary>
+  return `<div class="mtg-card"${faceData} data-preview-src="${escapeHTML(previewImage || '')}" data-preview-name="${escapeHTML(card.name || '')}" data-card-text="${escapeHTML(previewTextForCard(card))}">
+    <div class="mtg-card-face" aria-describedby="card-preview">${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(card.name)}">` : '<div class="card-placeholder"></div>'}<span class="card-quantity">${item.quantity || 1}×</span><strong>${escapeHTML(card.name || 'Unknown card')}</strong></div>
     ${faceSwitch}
-    <div class="card-details">${card.printed_name ? `<small>${escapeHTML(card.printed_name)}</small>` : ''}<span>${escapeHTML(card.mana_cost || '')}</span><em>${escapeHTML(card.type_line || '')}</em><p>${escapeHTML(card.oracle_text || 'No Oracle text available.')}</p></div>
     ${editorControls}
-  </details>`;
+  </div>`;
 }
 
 swapSearch.addEventListener('input', () => renderSwapRemoveList(swapSearch.value));
@@ -1454,25 +1453,43 @@ document.addEventListener('click', (event) => {
   imageElement?.setAttribute('alt', face.name || '');
   cardElement.dataset.previewSrc = face.image_normal || face.image_small || '';
   cardElement.dataset.previewName = face.name || '';
-  cardElement.querySelector('summary strong').textContent = face.name || '';
-  const details = cardElement.querySelector('.card-details');
-  details.querySelector('span').textContent = face.mana_cost || '';
-  details.querySelector('em').textContent = face.type_line || '';
-  details.querySelector('p').textContent = face.oracle_text || 'No Oracle text available.';
+  cardElement.querySelector('.mtg-card-face strong').textContent = face.name || '';
+  cardElement.dataset.cardText = previewTextForCard({ name: face.name, mana_cost: face.mana_cost, type_line: face.type_line, oracle_text: face.oracle_text });
   cardElement.querySelectorAll('.card-faces button').forEach((item) => {
     const active = item === button;
     item.classList.toggle('active', active);
     item.setAttribute('aria-pressed', String(active));
   });
-  if (activePreviewCard === cardElement) showCardPreview(cardElement.querySelector('summary'));
+  if (activePreviewCard === cardElement) showCardPreview(cardElement);
 });
 
 const preview = document.querySelector('#card-preview');
 const previewImage = document.querySelector('#card-preview-image');
 const previewName = document.querySelector('#card-preview-name');
+const previewOracle = document.querySelector('#card-preview-oracle');
 const canHover = window.matchMedia('(hover: hover) and (pointer: fine)');
 let activePreviewCard = null;
 let previewImageCache = new Map(); // url -> resolved element (pre-loaded large art)
+
+// Compose the hover preview's text block from a card's type line and rules text.
+// For multi-faced cards, each face's type line and oracle are joined so a split/DFC
+// card shows both halves. The front-end builds this from the payload already served
+// by the API, so no extra lookup happens on hover.
+function previewTextFor(card) {
+  const cardObj = card || {};
+  const lines = [];
+  const addFace = (face) => {
+    const type = String(face?.type_line || '').trim();
+    const oracle = String(face?.oracle_text || '').trim();
+    if (type) lines.push(type);
+    if (oracle) lines.push(oracle);
+  };
+  addFace(cardObj);
+  for (const face of Array.isArray(cardObj.faces) ? cardObj.faces : []) {
+    addFace(face);
+  }
+  return lines.join('\n\n');
+}
 
 function showCardPreview(trigger) {
   if (!canHover.matches || !trigger) return;
@@ -1482,6 +1499,10 @@ function showCardPreview(trigger) {
   activePreviewCard = card;
   previewImage.alt = card.dataset.previewName || '';
   previewName.textContent = card.dataset.previewName || '';
+  // Show the oracle text (type line + rules) read from the hovered card's own
+  // data, so a hover can answer "what does this card do" without a click.
+  previewOracle.textContent = card.dataset.cardText || '';
+  previewOracle.hidden = !previewOracle.textContent;
   // Show the small art immediately (it is already on the page and hot), then swap in
   // the large art once it has finished loading, so the preview never hangs blank.
   const small = card.querySelector('img')?.src || '';
@@ -1519,18 +1540,20 @@ function hideCardPreview() {
   activePreviewCard = null;
   preview.hidden = true;
   previewImage.removeAttribute('src');
+  previewOracle.textContent = '';
+  previewOracle.hidden = true;
 }
 
 document.addEventListener('pointerover', (event) => {
-  const trigger = event.target.closest('.mtg-card summary, .builder-candidate');
+  const trigger = event.target.closest('.mtg-card, .builder-candidate, .builder-chosen-item');
   if (trigger && !trigger.contains(event.relatedTarget)) showCardPreview(trigger);
 });
 document.addEventListener('pointerout', (event) => {
-  const trigger = event.target.closest('.mtg-card summary, .builder-candidate');
+  const trigger = event.target.closest('.mtg-card, .builder-candidate, .builder-chosen-item');
   if (trigger && !trigger.contains(event.relatedTarget)) hideCardPreview();
 });
-document.addEventListener('focusin', (event) => { if (event.target.matches('.mtg-card summary, .builder-candidate')) showCardPreview(event.target); });
-document.addEventListener('focusout', (event) => { if (event.target.matches('.mtg-card summary, .builder-candidate')) hideCardPreview(); });
+document.addEventListener('focusin', (event) => { if (event.target.matches('.mtg-card, .builder-candidate, .builder-chosen-item')) showCardPreview(event.target); });
+document.addEventListener('focusout', (event) => { if (event.target.matches('.mtg-card, .builder-candidate, .builder-chosen-item')) hideCardPreview(); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideCardPreview(); });
 window.addEventListener('scroll', hideCardPreview, { passive: true });
 window.addEventListener('resize', hideCardPreview);
