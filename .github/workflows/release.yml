@@ -16,7 +16,21 @@ permissions:
   contents: write   # 用于创建 GitHub Release
 
 jobs:
-  build:
+  # 统一计算版本号（提交时间），供所有 job 使用，保证一致
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          v=$(git log -1 --date=format:'%Y%m%d-%H%M' --format=%cd)
+          echo "Version (commit time): $v"
+          echo "version=$v" >> $GITHUB_OUTPUT
+
+  build-windows:
+    needs: version
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -25,17 +39,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod   # 自动按 go.mod 里的版本装 Go
-          cache: true               # 缓存依赖，加速后续构建
-
-      # 版本号 = HEAD 提交的时间（保留提交者时区），格式 20260818-1842
-      - name: Resolve version from commit time
-        shell: pwsh
-        run: |
-          $v = git log -1 --date=format:'%Y%m%d-%H%M' --format=%cd
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($v)) { throw "Failed to read commit time" }
-          Write-Host "Version (commit time): $v"
-          echo "VERSION=$v" >> $env:GITHUB_ENV
+          go-version-file: go.mod
+          cache: true
 
       - name: Run tests
         shell: pwsh
@@ -88,7 +93,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: edh-powerlevel-${{ env.VERSION }}
+          name: windows-files
           path: |
             server.exe
             server.exe.sha256
@@ -96,15 +101,83 @@ jobs:
             edh-powerlevel-client.exe.sha256
           if-no-files-found: error
 
-      # 创建 Release，tag 名形如 v20260818-1842
+  build-macos:
+    needs: version
+    runs-on: macos-latest   # Apple Silicon (arm64)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 测试已在 Windows job 跑过（同一份源码），这里跳过以节省时间
+      # chromedp 是纯 Go 库，CGO_ENABLED=0 交叉编译 macOS 版无障碍
+
+      # Intel 和 Apple Silicon 两个架构的服务端都编一份（终端直接跑用）
+      - name: Build server (darwin)
+        run: |
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -buildvcs=false -trimpath -ldflags "-s -w" -o server-darwin-arm64 ./cmd/server
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags "-s -w" -o server-darwin-amd64 ./cmd/server
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+
+      # 嵌入 arm64 服务端，编 .app（本地配置是不打包的，这里用 --config 临时覆盖）
+      - name: Build Tauri client (.app, embeds darwin server)
+        run: |
+          mkdir -p src-tauri/binaries
+          cp server-darwin-arm64 src-tauri/binaries/server-aarch64-apple-darwin
+          cd src-tauri
+          tauri build --config '{ "bundle": { "active": true, "targets": ["app"] } }'
+
+      - name: Package & checksums
+        run: |
+          ditto -c -k --sequesterRsrc "src-tauri/target/release/bundle/macos/EDH Power Level.app" "EDHPowerLevel-macos-arm64.zip"
+          for f in server-darwin-arm64 server-darwin-amd64 EDHPowerLevel-macos-arm64.zip; do
+            shasum -a 256 "$f" > "$f.sha256"
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-files
+          path: |
+            server-darwin-arm64
+            server-darwin-arm64.sha256
+            server-darwin-amd64
+            server-darwin-amd64.sha256
+            EDHPowerLevel-macos-arm64.zip
+            EDHPowerLevel-macos-arm64.zip.sha256
+          if-no-files-found: error
+
+  # 两个平台的产物汇总到同一个 Release
+  release:
+    needs: [version, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-files"
+          path: dist
+          merge-multiple: true
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION }}
-          name: edh-powerlevel ${{ env.VERSION }}
-          files: |
-            server.exe
-            server.exe.sha256
-            edh-powerlevel-client.exe
-            edh-powerlevel-client.exe.sha256
+          tag_name: v${{ needs.version.outputs.version }}
+          name: edh-powerlevel ${{ needs.version.outputs.version }}
+          files: dist/*
           generate_release_notes: true

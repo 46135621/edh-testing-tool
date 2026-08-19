@@ -11,8 +11,13 @@ use std::time::{Duration, Instant};
 
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
-/// 编译期把 Go 服务端整体嵌入本 exe（单文件分发的关键）
+/// 编译期把 Go 服务端整体嵌入本 exe（单文件分发的关键），按平台嵌入对应二进制
+#[cfg(windows)]
 const SERVER_BIN: &[u8] = include_bytes!("../binaries/server-x86_64-pc-windows-msvc.exe");
+#[cfg(target_os = "macos")]
+const SERVER_BIN: &[u8] = include_bytes!("../binaries/server-aarch64-apple-darwin");
+#[cfg(not(any(windows, target_os = "macos")))]
+const SERVER_BIN: &[u8] = &[];
 
 /// 保存 Go 服务子进程句柄，应用退出时负责杀掉
 struct ServerProcess(Mutex<Option<Child>>);
@@ -57,7 +62,7 @@ fn extract_server() -> std::io::Result<PathBuf> {
     let dir = base.join("EDHPowerLevel").join("runtime");
     fs::create_dir_all(&dir)?;
 
-    let exe = dir.join("server.exe");
+    let exe = dir.join(if cfg!(windows) { "server.exe" } else { "server" });
     let stamp = dir.join("server.stamp");
     let hash = fnv1a(SERVER_BIN).to_string();
 
@@ -67,6 +72,12 @@ fn extract_server() -> std::io::Result<PathBuf> {
             .unwrap_or(false);
     if !up_to_date {
         fs::write(&exe, SERVER_BIN)?;
+        // Unix 系统上写文件不会带可执行权限，必须显式添加
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&exe, fs::Permissions::from_mode(0o755))?;
+        }
         fs::write(&stamp, hash)?;
     }
     Ok(exe)
@@ -94,6 +105,9 @@ fn spawn_server(exe: &PathBuf, port: u16) -> std::io::Result<Child> {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
+            if SERVER_BIN.is_empty() {
+                return Err("当前平台未内嵌服务端，暂不支持".into());
+            }
             let port = pick_free_port();
 
             let exe = extract_server().map_err(|e| format!("释放内嵌 server 失败: {e}"))?;
