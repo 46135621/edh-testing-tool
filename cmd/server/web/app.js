@@ -694,9 +694,10 @@ function renderBuilderSidebar() {
   const byName = new Map();
   for (const item of buildCards) {
     const key = normalizeBuildName(item.name);
-    const entry = byName.get(key) || { name: item.name, count: 0, card: item.card };
+    const entry = byName.get(key) || { name: item.name, count: 0, card: item.card, game_changer: false };
     entry.count += 1;
     if (!entry.card?.name) entry.card = item.card;
+    if (item.game_changer) entry.game_changer = true;
     byName.set(key, entry);
   }
   const chosenList = Array.from(byName.values())
@@ -1491,10 +1492,18 @@ function previewTextFor(card) {
   return lines.join('\n\n');
 }
 
+// Alias kept for the decklist card renderer, which uses the longer name.
+function previewTextForCard(card) {
+  return previewTextFor(card);
+}
+
 function showCardPreview(trigger) {
   if (!canHover.matches || !trigger) return;
   const card = trigger.closest('[data-preview-src]');
   const source = card?.dataset.previewSrc;
+  // The chosen-list rows have no <img> of their own, so "small" would be empty and the
+  // preview would stay blank until the large art loads. When no thumbnail exists, fall
+  // back to the large art directly.
   if (!source) return;
   activePreviewCard = card;
   previewImage.alt = card.dataset.previewName || '';
@@ -1518,6 +1527,9 @@ function showCardPreview(trigger) {
     };
     img.onerror = () => previewImageCache.delete(source);
     img.src = source;
+  } else {
+    // No on-page thumbnail (e.g. the chosen-list rows): load the large art directly.
+    previewImage.src = source;
   }
   preview.hidden = false;
   requestAnimationFrame(() => positionCardPreview(trigger));
