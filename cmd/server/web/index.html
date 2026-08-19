@@ -73,6 +73,7 @@
           <div class="builder-actions">
             <button id="builder-skip" class="ghost-button" type="button">换一批</button>
             <button id="builder-lands" class="ghost-button" type="button">一键出地</button>
+            <button id="builder-staples" class="ghost-button" type="button">常见单卡</button>
             <span class="builder-basics">
               <span class="builder-basics-label">快速加基本地：</span>
               <button type="button" data-basic="Plains">白</button>
@@ -81,6 +82,14 @@
               <button type="button" data-basic="Mountain">红</button>
               <button type="button" data-basic="Forest">绿</button>
             </span>
+          </div>
+          <div id="builder-staples-panel" class="builder-staples-panel" hidden>
+            <div class="builder-lands-head">
+              <strong>常见单卡</strong>
+              <button id="builder-staples-close" class="ghost-button" type="button">关闭</button>
+            </div>
+            <div id="builder-staples-categories" class="builder-lands-grid"></div>
+            <div id="builder-staples-result" class="builder-lands-result"></div>
           </div>
         </div>
         <aside id="builder-sidebar" class="builder-sidebar"></aside>
@@ -145,7 +154,10 @@
         <div class="section-heading"><div><p class="eyebrow">FULL DECK</p><h2>完整牌表</h2></div><div class="deck-actions"><button id="copy-decklist" class="ghost-button" type="button">复制牌表</button><button id="decklist-toggle" class="ghost-button" type="button">展开牌表</button></div></div>
         <div id="editor-toolbar" class="editor-toolbar">
           <div class="editor-add-row">
-            <input id="editor-add-card" type="text" placeholder="添加卡牌（输入名称）" autocomplete="off" spellcheck="false">
+            <div class="editor-add-field">
+              <input id="editor-add-card" type="text" placeholder="添加卡牌（输入名称）" autocomplete="off" spellcheck="false">
+              <ul id="editor-add-suggestions" class="editor-add-suggestions" hidden></ul>
+            </div>
             <button id="editor-add-submit" class="ghost-button" type="button">添加</button>
           </div>
           <div class="editor-actions">

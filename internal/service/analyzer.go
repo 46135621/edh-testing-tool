@@ -193,8 +193,10 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supp
 				analysis.Warnings = append(analysis.Warnings, "DECK_SOURCE_MISMATCH：CommanderSalt 与标准牌表内容不一致。")
 			}
 		}
+	} else if a.commanderSalt == nil {
+		analysis.Results["commandersalt"] = ProviderResult{Status: "unavailable", Error: &ProviderError{Code: "PROVIDER_DISABLED", Message: "CommanderSalt 数据源未配置，无法进行该评分。"}}
 	} else {
-		analysis.Results["commandersalt"] = ProviderResult{Status: "unavailable", Error: &ProviderError{Code: "URL_REQUIRED", Message: "CommanderSalt requires a Moxfield URL."}}
+		analysis.Results["commandersalt"] = ProviderResult{Status: "unavailable", Error: &ProviderError{Code: "TEXT_INPUT_ONLY", Message: "CommanderSalt 仅支持 Moxfield 链接录入，纯文本牌表无法获得该评分。"}}
 	}
 	analysis.Deck = summarize(target)
 	analysis.CanonicalDecklist = target.ExportPlainText()

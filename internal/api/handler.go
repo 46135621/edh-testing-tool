@@ -47,6 +47,12 @@ type buildLandsRequest struct {
 	ColorIdentity []string `json:"color_identity"`
 }
 
+type buildStaplesRequest struct {
+	Commander     string   `json:"commander"`
+	Category      string   `json:"category"`
+	ColorIdentity []string `json:"color_identity"`
+}
+
 type errorResponse struct {
 	Error struct {
 		Code    string `json:"code"`
@@ -63,7 +69,9 @@ func NewHandler(analyzer *service.Analyzer, logger *slog.Logger, requestTimeout 
 	mux.HandleFunc("GET /api/v1/card", handler.lookupCard)
 	mux.HandleFunc("POST /api/v1/build-suggest", handler.buildSuggest)
 	mux.HandleFunc("POST /api/v1/build-lands", handler.buildLands)
+	mux.HandleFunc("POST /api/v1/build-staples", handler.buildStaples)
 	mux.HandleFunc("GET /api/v1/commander-autocomplete", handler.commanderAutocomplete)
+	mux.HandleFunc("GET /api/v1/card-autocomplete", handler.cardAutocomplete)
 	mux.Handle("GET /", static)
 	return securityHeaders(requestLogger(logger, mux))
 }
@@ -223,6 +231,25 @@ func (h *Handler) commanderAutocomplete(w http.ResponseWriter, r *http.Request) 
 	}{Suggestions: names})
 }
 
+func (h *Handler) cardAutocomplete(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeError(w, http.StatusBadRequest, "QUERY_REQUIRED", "请输入卡牌名称片段。")
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, h.requestTimeout)
+	defer cancel()
+	names, err := h.analyzer.SuggestCards(ctx, query, 12)
+	if err != nil {
+		status, code, message := buildSuggestError(err)
+		writeError(w, status, code, message)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Suggestions []string `json:"suggestions"`
+	}{Suggestions: names})
+}
+
 func (h *Handler) buildLands(w http.ResponseWriter, r *http.Request) {
 	body := http.MaxBytesReader(w, r.Body, 64<<10)
 	defer body.Close()
@@ -258,6 +285,44 @@ func buildLandsError(err error) (int, string, string) {
 		return http.StatusBadRequest, "LAND_CATEGORY_REQUIRED", "未知的地牌类别。"
 	default:
 		return http.StatusBadGateway, "LANDS_FAILED", "暂时无法加载地牌。"
+	}
+}
+
+func (h *Handler) buildStaples(w http.ResponseWriter, r *http.Request) {
+	body := http.MaxBytesReader(w, r.Body, 64<<10)
+	defer body.Close()
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	var request buildStaplesRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "请求体必须是有效的单卡 JSON。")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "请求体只能包含一个 JSON 对象。")
+		return
+	}
+	if strings.TrimSpace(request.Category) == "" {
+		writeError(w, http.StatusBadRequest, "STAPLE_CATEGORY_REQUIRED", "请指定单卡类别。")
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, h.requestTimeout)
+	defer cancel()
+	response, err := h.analyzer.BuildStaples(ctx, request.Category, request.ColorIdentity)
+	if err != nil {
+		status, code, message := buildStaplesError(err)
+		writeError(w, status, code, message)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func buildStaplesError(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, service.ErrCardData), errors.Is(err, service.ErrAddCardNotFound), strings.Contains(err.Error(), "unknown staple category"):
+		return http.StatusBadRequest, "STAPLE_CATEGORY_REQUIRED", "未知的单卡类别。"
+	default:
+		return http.StatusBadGateway, "STAPLES_FAILED", "暂时无法加载单卡。"
 	}
 }
 

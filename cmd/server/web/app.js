@@ -31,6 +31,7 @@ let editorDirty = false;        // true when a local edit has not been re-analyz
 const editorToolbar = document.querySelector('#editor-toolbar');
 const editorAddInput = document.querySelector('#editor-add-card');
 const editorAddButton = document.querySelector('#editor-add-submit');
+const editorAddSuggestions = document.querySelector('#editor-add-suggestions');
 const editorUndoButton = document.querySelector('#editor-undo');
 const editorRedoButton = document.querySelector('#editor-redo');
 const editorSaveVersionButton = document.querySelector('#editor-save-version');
@@ -56,6 +57,10 @@ const builderLandsButton = document.querySelector('#builder-lands');
 const builderLandsPanel = document.querySelector('#builder-lands-panel');
 const builderLandsClose = document.querySelector('#builder-lands-close');
 const builderLandsGrid = document.querySelector('#builder-lands-grid');
+const builderStaplesButton = document.querySelector('#builder-staples');
+const builderStaplesPanel = document.querySelector('#builder-staples-panel');
+const builderStaplesClose = document.querySelector('#builder-staples-close');
+const builderStaplesCategories = document.querySelector('#builder-staples-categories');
 const builderSidebar = document.querySelector('#builder-sidebar');
 const builderComplete = document.querySelector('#builder-complete');
 const builderExport = document.querySelector('#builder-export');
@@ -83,6 +88,12 @@ const LAND_CATEGORIES = [
   { id: 'multiplayer', label: '多人地' },
   { id: 'fetch', label: '找地' },
   { id: 'triome', label: '三色圈' }
+];
+
+// 常见单卡分类。ID 与后端 service.StapleCategories 对齐；点单类后按主将色组过滤。
+const STAPLE_CATEGORIES = [
+  { id: 'ramp', label: '常见法术力增长' },
+  { id: 'game-changer', label: '可用的 Game Changer' }
 ];
 
 // construction metric targets (labels mirror the server's construction.Report).
@@ -223,6 +234,110 @@ builderCommanderSuggestions.addEventListener('mousedown', (event) => {
   }
 });
 
+// --- editor card autocomplete -------------------------------------------------
+// Typeahead on the light editor's add-card input, reusing the same debounce +
+// AbortController pattern as the commander field but against the (non-Commander
+// filtered) card-autocomplete endpoint.
+let editorAutocompleteController = null;
+let editorAutocompleteTimer = null;
+let editorAutocompleteIndex = -1;
+
+function editorSuggestionItems() {
+  return Array.from(editorAddSuggestions.querySelectorAll('[data-suggestion]'));
+}
+
+function renderEditorSuggestions(names) {
+  editorAutocompleteIndex = -1;
+  if (!names || names.length === 0) {
+    hideEditorSuggestions();
+    return;
+  }
+  editorAddSuggestions.innerHTML = names.map((name) =>
+    `<li role="option" data-suggestion="${escapeHTML(name)}">${escapeHTML(name)}</li>`).join('');
+  editorAddSuggestions.hidden = false;
+}
+
+function hideEditorSuggestions() {
+  editorAutocompleteController?.abort();
+  editorAddSuggestions.hidden = true;
+  editorAddSuggestions.innerHTML = '';
+  editorAutocompleteIndex = -1;
+}
+
+function highlightEditorSuggestion(index) {
+  const items = editorSuggestionItems();
+  items.forEach((item, i) => {
+    item.classList.toggle('active', i === index);
+    if (i === index) item.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+async function queryEditorSuggestions(query) {
+  const value = String(query ?? '').trim();
+  if (value.length < 2) {
+    hideEditorSuggestions();
+    return;
+  }
+  editorAutocompleteController?.abort();
+  const controller = new AbortController();
+  editorAutocompleteController = controller;
+  try {
+    const response = await fetch(`/api/v1/card-autocomplete?q=${encodeURIComponent(value)}`, { signal: controller.signal });
+    const payload = await response.json();
+    if (response.ok && Array.isArray(payload.suggestions)) {
+      renderEditorSuggestions(payload.suggestions);
+    } else {
+      hideEditorSuggestions();
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') hideEditorSuggestions();
+  }
+}
+
+function chooseEditorSuggestion(name) {
+  editorAddInput.value = name;
+  hideEditorSuggestions();
+  editorAddInput.focus();
+}
+
+editorAddInput.addEventListener('input', () => {
+  clearTimeout(editorAutocompleteTimer);
+  editorAutocompleteTimer = setTimeout(() => queryEditorSuggestions(editorAddInput.value), 220);
+});
+
+editorAddInput.addEventListener('keydown', (event) => {
+  const items = editorSuggestionItems();
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    editorAutocompleteIndex = Math.min(editorAutocompleteIndex + 1, items.length - 1);
+    highlightEditorSuggestion(editorAutocompleteIndex);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    editorAutocompleteIndex = Math.max(editorAutocompleteIndex - 1, 0);
+    highlightEditorSuggestion(editorAutocompleteIndex);
+  } else if (event.key === 'Enter') {
+    const active = items[editorAutocompleteIndex];
+    if (active) {
+      event.preventDefault();
+      chooseEditorSuggestion(active.dataset.suggestion);
+    }
+  } else if (event.key === 'Escape') {
+    hideEditorSuggestions();
+  }
+});
+
+editorAddInput.addEventListener('blur', () => {
+  setTimeout(hideEditorSuggestions, 120);
+});
+
+editorAddSuggestions.addEventListener('mousedown', (event) => {
+  const item = event.target.closest('[data-suggestion]');
+  if (item) {
+    event.preventDefault();
+    chooseEditorSuggestion(item.dataset.suggestion);
+  }
+});
+
 
 // 一键出地：展开/收起八个地牌分类按钮。点击单个分类按主将色组请求可用地牌，
 // 渲染成可点选的小图，点某张地把它加入草稿。
@@ -242,6 +357,69 @@ function toggleLandsPanel() {
 
 function closeLandsPanel() {
   builderLandsPanel.hidden = true;
+}
+
+// 常见单卡：展开/收起分类按钮，点单个分类按主将色组请求可用单卡并渲染成可点选
+// 的小图，点某张常见单卡把它加入草稿。
+function toggleStaplesPanel() {
+  const visible = !builderStaplesPanel.hidden;
+  if (visible) {
+    builderStaplesPanel.hidden = true;
+    return;
+  }
+  builderStaplesCategories.innerHTML = STAPLE_CATEGORIES.map((category) => `
+    <button type="button" class="builder-land-category" data-staple-category="${category.id}">
+      <strong>${category.label}</strong>
+    </button>`).join('');
+  builderStaplesPanel.hidden = false;
+}
+
+function closeStaplesPanel() {
+  builderStaplesPanel.hidden = true;
+}
+
+function addStapleCard(name, card) {
+  if (!name) return;
+  const key = normalizeBuildName(name);
+  if (buildChosen.includes(key)) return;
+  if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
+  buildChosen.push(key);
+  buildCards.push({ name, card: card || { name, type_line: 'Artifact' } });
+  renderBuilderSidebar();
+  if (isBuilderComplete()) {
+    builderWorkflow.hidden = true;
+    builderComplete.hidden = false;
+  } else {
+    refreshIfCandidateCollides();
+  }
+}
+
+async function loadStapleCategory(categoryID) {
+  const resultBox = document.querySelector('#builder-staples-result');
+  if (!resultBox) return;
+  const category = STAPLE_CATEGORIES.find((item) => item.id === categoryID);
+  resultBox.innerHTML = '<p class="editor-empty">正在加载单卡…</p>';
+  try {
+    const response = await fetch('/api/v1/build-staples', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: categoryID, color_identity: buildColors })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error?.message || '无法加载单卡。');
+    const staples = Array.isArray(payload.staples) ? payload.staples : [];
+    if (!staples.length) {
+      resultBox.innerHTML = '<p class="editor-empty">该类别在你的主将色组内没有可用单卡。</p>';
+      return;
+    }
+    resultBox.innerHTML = `<div class="builder-lands-head"><strong>${escapeHTML(payload.category_label || category?.label || '')}</strong><small>点击加入草稿</small></div>
+      <div class="builder-lands-cards">${staples.map((staple) => {
+        const image = cardImage(staple.card);
+        return `<button type="button" class="builder-land-card" data-staple-name="${escapeHTML(staple.name)}" data-staple-card="${escapeHTML(JSON.stringify(staple.card || {}))}">${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(staple.name)}">` : '<div class="builder-candidate-placeholder"></div>'}<span>${escapeHTML(staple.name)}</span></button>`;
+      }).join('')}</div>`;
+  } catch (error) {
+    resultBox.innerHTML = `<p class="form-message">${escapeHTML(error.message || '加载失败')}</p>`;
+  }
 }
 
 async function loadLandCategory(categoryID) {
@@ -281,11 +459,26 @@ function addLandCard(name) {
   if (isBuilderComplete()) {
     builderWorkflow.hidden = true;
     builderComplete.hidden = false;
+  } else {
+    refreshIfCandidateCollides();
   }
 }
 
 function isBuilderComplete() {
   return buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET;
+}
+
+// After a quick-add (land / basic / staple / candidate) puts a card into the draft,
+// refresh the 3-choose-1 hand if any currently shown candidate is now already chosen.
+// This keeps the visible hand from lingering on a card the user just added, without
+// reordering or de-duplicating the random pool itself (scheme A).
+function refreshIfCandidateCollides() {
+  if (!buildCandidates.length || !buildCommander) return;
+  const collided = buildCandidates.some((candidate) => {
+    const key = normalizeBuildName(candidate.name);
+    return buildChosen.includes(key) || buildCards.some((card) => normalizeBuildName(card.name) === key);
+  });
+  if (collided) nextBuildBatch();
 }
 
 async function startBuild() {
@@ -330,11 +523,12 @@ function applyBuildCandidates(candidates) {
     const image = cardImage(card.card);
     const preview = cardPreviewImage(card.card);
     const fills = (card.fills || []).map((id) => buildMetricLabel(id)).filter(Boolean).join(' · ');
+    const gcBadge = card.game_changer ? '<span class="builder-gc-tag" title="Game Changer">GC</span>' : '';
     return `
       <button type="button" class="builder-candidate" data-candidate="${index}" data-preview-src="${escapeHTML(preview)}" data-preview-name="${escapeHTML(card.name)}">
         ${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(card.name)}">` : '<div class="builder-candidate-placeholder"></div>'}
         <div class="builder-candidate-body">
-          <strong>${escapeHTML(card.name)}</strong>
+          <div class="builder-candidate-title">${gcBadge}<strong>${escapeHTML(card.name)}</strong></div>
           <span class="builder-synergy">Synergy ${(Number(card.synergy) || 0).toFixed(0)}%</span>
           ${fills ? `<small>补足：${escapeHTML(fills)}</small>` : ''}
         </div>
@@ -435,7 +629,28 @@ function addBasicLand(type) {
   if (isBuilderComplete()) {
     builderWorkflow.hidden = true;
     builderComplete.hidden = false;
+  } else {
+    refreshIfCandidateCollides();
   }
+}
+
+// Remove one copy of the named card from the draft. When the last copy is removed the
+// name also leaves buildChosen, so the 3-choose-1 pool may offer it again on a later
+// refresh. Reopening the completed deck (if the builder had finished) is left to the
+// caller, but here we simply re-show the workflow if the draft drops below 100.
+function removeBuildCard(name) {
+  if (!name) return;
+  const index = buildCards.findIndex((card) => normalizeBuildName(card.name) === normalizeBuildName(name));
+  if (index < 0) return;
+  buildCards.splice(index, 1);
+  const key = normalizeBuildName(name);
+  const stillPresent = buildCards.some((card) => normalizeBuildName(card.name) === key);
+  if (!stillPresent) {
+    buildChosen = buildChosen.filter((chosen) => chosen !== key);
+  }
+  builderComplete.hidden = true;
+  builderWorkflow.hidden = false;
+  renderBuilderSidebar();
 }
 
 function renderBuilderSidebar() {
@@ -465,7 +680,10 @@ function renderBuilderSidebar() {
     .map((entry) => `
       <li class="builder-chosen-item">
         <span class="builder-chosen-name">${escapeHTML(entry.name)}</span>
-        <strong class="builder-chosen-count">${entry.count}×</strong>
+        <span class="builder-chosen-side">
+          <strong class="builder-chosen-count">${entry.count}×</strong>
+          <button type="button" class="builder-chosen-remove" data-remove-name="${escapeHTML(entry.name)}" title="移除一张" aria-label="移除 ${escapeHTML(entry.name)}">−</button>
+        </span>
       </li>`).join('');
 
   builderSidebar.innerHTML = `
@@ -522,6 +740,8 @@ builderStartButton.addEventListener('click', startBuild);
 builderSkip.addEventListener('click', nextBuildBatch);
 builderLandsButton.addEventListener('click', toggleLandsPanel);
 builderLandsClose.addEventListener('click', closeLandsPanel);
+builderStaplesButton.addEventListener('click', toggleStaplesPanel);
+builderStaplesClose.addEventListener('click', closeStaplesPanel);
 builderExport.addEventListener('click', () => downloadText('decklist.txt', builderToDeckText()));
 builderAnalyze.addEventListener('click', () => {
   decklistInput.value = builderToDeckText();
@@ -550,9 +770,30 @@ document.addEventListener('click', (event) => {
     addLandCard(landCard.dataset.landName || '');
     return;
   }
+  const stapleCategory = event.target.closest('[data-staple-category]');
+  if (stapleCategory) {
+    loadStapleCategory(stapleCategory.dataset.stapleCategory || '');
+    return;
+  }
+  const stapleCard = event.target.closest('[data-staple-name]');
+  if (stapleCard) {
+    let card = {};
+    try {
+      card = JSON.parse(stapleCard.dataset.stapleCard || '{}');
+    } catch {
+      card = {};
+    }
+    addStapleCard(stapleCard.dataset.stapleName || '', card);
+    return;
+  }
   const basicButton = event.target.closest('[data-basic]');
   if (basicButton) {
     addBasicLand(basicButton.dataset.basic || '');
+    return;
+  }
+  const removeButton = event.target.closest('[data-remove-name]');
+  if (removeButton) {
+    removeBuildCard(removeButton.dataset.removeName || '');
     return;
   }
 });
@@ -1248,9 +1489,19 @@ function renderProvider(prefix, provider, secondaryMetrics) {
   const status = document.querySelector(`#${prefix}-status`);
   const content = document.querySelector(`#${prefix}-content`);
   if (!provider || provider.status !== 'success') {
-    status.textContent = '失败';
-    status.className = 'status error';
-    content.innerHTML = `<p class="provider-error">${escapeHTML(provider?.error?.message || '该评分网站暂时无法返回结果。')}</p>`;
+    const code = provider?.error?.code || '';
+    const message = provider?.error?.message || '该评分网站暂时无法返回结果。';
+    if (!provider || provider.status === 'unavailable') {
+      // "unavailable" is a known, expected state (e.g. text input has no Moxfield
+      // URL for CommanderSalt), so label it differently from a hard failure.
+      status.textContent = '跳过';
+      status.className = 'status muted';
+      content.innerHTML = `<p class="provider-muted">${escapeHTML(message)}</p>`;
+    } else {
+      status.textContent = '失败';
+      status.className = 'status error';
+      content.innerHTML = `<p class="provider-error">${escapeHTML(message)}</p>`;
+    }
     return;
   }
 

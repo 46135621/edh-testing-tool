@@ -25,12 +25,13 @@ var ErrBuildBackfill = errors.New("could not backfill the candidate pool")
 
 // BuildCandidate is one suggested card the guided builder may offer the user.
 type BuildCandidate struct {
-	Name        string  `json:"name"`
-	Synergy     float64 `json:"synergy"`
-	Inclusion   float64 `json:"inclusion_rate"`
-	Fills       []string `json:"fills"` // construction gap ids this card would help fill
+	Name        string           `json:"name"`
+	Synergy     float64          `json:"synergy"`
+	Inclusion   float64          `json:"inclusion_rate"`
+	Fills       []string         `json:"fills"` // construction gap ids this card would help fill
 	Card        cardcatalog.Card `json:"card"`
-	SourceURL   string  `json:"source_url,omitempty"`
+	SourceURL   string           `json:"source_url,omitempty"`
+	GameChanger bool             `json:"game_changer"` // true for cards on the Commander Game Changer list
 }
 
 // BuildSuggestRequest seeds the guided builder: the commander name plus the cards
@@ -190,6 +191,9 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 	}
 
 	// Base draw pool: everything not chosen (chosen cards are never re-offered).
+	// Cards can be added both here and through the quick-add panels; both share the
+	// same `chosen` exclusion, so the randomized hand does not artificially hide
+	// popular lands/staples a pure 3-choose-1 player still wants to see.
 	base := make([]edhrecPoolCard, 0, len(pool))
 	for _, item := range pool {
 		if _, used := chosen[normalizeCardName(item.name)]; used {
@@ -227,12 +231,13 @@ func (a *Analyzer) BuildSuggest(ctx context.Context, request BuildSuggestRequest
 	candidates := make([]BuildCandidate, 0, len(selected))
 	for _, item := range selected {
 		candidates = append(candidates, BuildCandidate{
-			Name:      item.name,
-			Synergy:   item.synergy,
-			Inclusion: item.inclusion,
-			Fills:     classifyIDs(construction.Classify(item.card)),
-			Card:      item.card,
-			SourceURL: item.source,
+			Name:        item.name,
+			Synergy:     item.synergy,
+			Inclusion:   item.inclusion,
+			Fills:       classifyIDs(construction.Classify(item.card)),
+			Card:        item.card,
+			SourceURL:   item.source,
+			GameChanger: isGameChanger(item.card),
 		})
 	}
 
