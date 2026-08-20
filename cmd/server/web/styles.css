@@ -58,6 +58,8 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .decklist-input-panel { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
 .decklist-input-panel summary { cursor: pointer; color: var(--blue); font-weight: 700; font-size: 15px; }
 .decklist-input-panel label { display: block; margin: 14px 0 7px; color: var(--muted); font-size: 13px; }
+.decklist-label-row { display: flex; justify-content: space-between; align-items: center; }
+.clear-decklist { margin-top: 14px; padding: 6px 12px; font-size: 12px; }
 .decklist-input-panel textarea { width: 100%; resize: vertical; min-height: 150px; padding: 13px; border: 1px solid #555a50; color: var(--ink); background: #0e100d; font: 14px/1.6 var(--font-ui); }
 .decklist-input-panel p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .form-message { min-height: 20px; margin: 12px 0 0; color: var(--orange); font-size: 14px; }
@@ -320,6 +322,7 @@ input:focus { box-shadow: inset 0 0 0 1px var(--acid); }
 .builder-commander-suggestions li { padding: 9px 11px; color: var(--ink); font: 13px var(--font-ui); cursor: pointer; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .builder-commander-suggestions li:hover, .builder-commander-suggestions li.active { background: var(--acid); color: #10120d; }
 .builder-workflow { display: grid; grid-template-columns: 1fr 320px; gap: 22px; margin-top: 22px; }
+.builder-workflow[hidden] { display: none; }
 .builder-candidates { display: grid; gap: 12px; }
 .builder-candidate { display: flex; gap: 16px; padding: 16px; border: 1px solid var(--line); background: #1a1c18; color: var(--ink); text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
 .builder-candidate:hover { border-color: var(--acid); transform: translateX(3px); }

@@ -195,22 +195,8 @@ jobs:
         with:
           packages: platforms;android-34 build-tools;34.0.0
 
-      # 官方动作直接拉取固定版本的 Gradle 发行版；不依赖 apt（ubuntu-latest 无 gradle 包）。
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.7
-
-      - name: Generate Gradle wrapper
-        working-directory: android
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
-        run: |
-          # AGP 8.5.2 需要 JDK 17；setup-java 的结果通过 JAVA_HOME 传入，
-          # 否则 gradle wrapper 会用系统默认的 JDK 8 解析 build.gradle 而报错。
-          echo "JAVA_HOME=$JAVA_HOME"
-          gradle wrapper --gradle-version 8.7
-
+      # 壳工程已提交 gradlew + gradle-wrapper.jar + wrapper.properties，
+      # 所以这里直接用 wrapper 构建，无需现场生成、也无需系统 gradle。
       - name: Install gomobile
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -223,6 +209,8 @@ jobs:
 
       - name: Assemble APK
         working-directory: android
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon

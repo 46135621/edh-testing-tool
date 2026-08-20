@@ -36,7 +36,10 @@
         </div>
         <details class="decklist-input-panel">
           <summary>或粘贴牌表文本</summary>
-          <label for="decklist-input">牌表必须包含 Commander 和 Deck 标题</label>
+          <div class="decklist-label-row">
+            <label for="decklist-input">牌表必须包含 Commander 和 Deck 标题</label>
+            <button id="clear-decklist" class="ghost-button clear-decklist" type="button">一键清空</button>
+          </div>
           <textarea id="decklist-input" rows="10" placeholder="Commander&#10;1 Ria Ivor, Bane of Bladehold&#10;&#10;Deck&#10;1 Sol Ring"></textarea>
           <p>填写文本时将优先使用文本作为分析牌表。</p>
         </details>

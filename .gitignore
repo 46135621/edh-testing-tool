@@ -21,3 +21,9 @@ server.exe.sha256
 src-tauri/target/
 src-tauri/gen/
 src-tauri/binaries/
+
+# Android (壳工程的本地构建产物；wrapper 本体已提交)
+android/.gradle/
+android/app/build/
+android/app/libs/mobile.aar
+android/local.properties

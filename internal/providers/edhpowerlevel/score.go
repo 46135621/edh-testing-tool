@@ -736,7 +736,7 @@ func computeBracket(scored []*scoredCard, powerLevel float64, combos []spellbook
 	turns := ruleSet{maxes: []int{0, 2, 3, 100, 100}}
 	denial := ruleSet{maxes: []int{0, 0, 0, 100, 100}, underBrack: 3}
 	gameChangers := ruleSet{maxes: []int{0, 0, 3, 100, 100}}
-	earlyCombos := ruleSet{maxes: []int{0, 0, 0, 100, 100}}
+	earlyCombos := ruleSet{maxes: []int{0, 0, 0, 0, 100}}
 	lateCombos := ruleSet{maxes: []int{0, 0, 100, 100, 100}}
 
 	details := &bracketDetails{}

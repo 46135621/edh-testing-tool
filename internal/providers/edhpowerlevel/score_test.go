@@ -88,6 +88,17 @@ func TestComputeBracketComboClassification(t *testing.T) {
 	if len(details2.lateComboNames) != 1 {
 		t.Fatalf("late combo not recorded: %v", details2.lateComboNames)
 	}
+
+	// An early 2-card combo forces a minimum "rules bracket" of 4: the early-combo
+	// restriction first bites at Bracket 4 (only Brackets 4-5 may run one), which
+	// carries through to the recommended/evaluated bracket.
+	rules, details3 := computeBracket(nil, 0, early, cmc)
+	if rules != 4 {
+		t.Fatalf("rules bracket with early combo = %d, want 4", rules)
+	}
+	if len(details3.EarlyTwoCardComboNames) != 1 {
+		t.Fatalf("early combo names not preserved: %+v", details3.EarlyTwoCardComboNames)
+	}
 }
 
 func TestLookupCardFlavorName(t *testing.T) {

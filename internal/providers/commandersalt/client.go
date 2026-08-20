@@ -100,6 +100,11 @@ func (c *Client) Analyze(ctx context.Context, sourceURL, sourceID string) (Resul
 	var fullPayload map[string]json.RawMessage
 	_ = json.Unmarshal(body, &fullPayload)
 
+	// CommanderSalt returns each double-faced card's two faces as separate map
+	// entries sharing a FrontFaceId, with only the front face flagged IsFrontFace.
+	// The back face is deliberately skipped below (IsFrontFace gate at line ~110),
+	// so nothing needs doing here — kept as a place to hang that note.
+
 	resultDeck := deck.Deck{SourceURL: sourceURL, SourceID: sourceID, Name: payload.DeckName}
 	if resultDeck.Name == "" {
 		resultDeck.Name = strings.Join(payload.Commanders, " / ")

@@ -9,6 +9,7 @@ const warning = document.querySelector('#warning');
 const retryButton = document.querySelector('#retry-button');
 const decklistToggle = document.querySelector('#decklist-toggle');
 const copyDecklistButton = document.querySelector('#copy-decklist');
+const clearDecklistButton = document.querySelector('#clear-decklist');
 let currentDeckText = '';
 let currentDeckCards = [];
 let pendingSwapAdd = '';
@@ -1088,6 +1089,11 @@ retryButton.addEventListener('click', () => {
   results.hidden = true;
   input.focus();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+clearDecklistButton.addEventListener('click', () => {
+  decklistInput.value = '';
+  decklistInput.focus();
 });
 
 async function analyze() {
