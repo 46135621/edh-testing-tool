@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	mathrand "math/rand"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"powerlevel/internal/manabase"
 	"powerlevel/internal/providers/cardcatalog"
 	"powerlevel/internal/providers/commandersalt"
+	"powerlevel/internal/providers/edhpowerlevel"
 	"powerlevel/internal/providers/edhrec"
 	"powerlevel/internal/providers/spellbook"
 	"powerlevel/internal/service/construction"
@@ -79,6 +81,7 @@ type Analyzer struct {
 	deckSource      DeckSource
 	commanderSalt   CommanderSaltAnalyzer
 	edh             EDHAnalyzer
+	edhHTTP         *http.Client
 	cards           CardCatalog
 	spellbook       Spellbook
 	edhrec          EDHRecommender
@@ -97,6 +100,7 @@ func NewAnalyzer(
 	deckSource DeckSource,
 	commanderSalt CommanderSaltAnalyzer,
 	edh EDHAnalyzer,
+	edhHTTP *http.Client,
 	cards CardCatalog,
 	spellbookClient Spellbook,
 	edhrecClient EDHRecommender,
@@ -110,6 +114,7 @@ func NewAnalyzer(
 		deckSource:      deckSource,
 		commanderSalt:   commanderSalt,
 		edh:             edh,
+		edhHTTP:         edhHTTP,
 		cards:           cards,
 		spellbook:       spellbookClient,
 		edhrec:          edhrecClient,
@@ -206,6 +211,7 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supp
 	analysis.Deck = summarize(target)
 	analysis.CanonicalDecklist = target.ExportPlainText()
 	analysis.DeckRevision = deckRevision(analysis.CanonicalDecklist)
+	var catalogCMC map[string]int
 	if a.cards != nil {
 		cardCtx, cancelCards := context.WithTimeout(ctx, a.providerTimeout)
 		catalog, cardErr := a.cards.Lookup(cardCtx, deckNames(target))
@@ -221,6 +227,7 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supp
 			report := construction.Build(inputs)
 			analysis.ConstructionReport = &report
 			analysis.Manabase = manabaseReport(target, analysis.DeckCards)
+			catalogCMC = catalogCMCs(target, catalog, nil)
 		}
 	}
 
@@ -243,6 +250,7 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supp
 		}
 	}
 
+	var combos []spellbook.Combo
 	if a.spellbook != nil {
 		comboCtx, cancelCombos := context.WithTimeout(ctx, a.providerTimeout)
 		found, comboErr := a.spellbook.Search(comboCtx, deckNames(target), 12)
@@ -250,12 +258,24 @@ func (a *Analyzer) analyze(ctx context.Context, sourceURL, sourceID string, supp
 		if comboErr != nil {
 			analysis.Warnings = append(analysis.Warnings, "Commander Spellbook 组合暂时无法加载。")
 		} else {
+			combos = found
 			analysis.Combos, analysis.RelatedCards = buildCombos(found, analysis.DeckCards)
 		}
 	}
 
 	edhCtx, cancelEDH := context.WithTimeout(ctx, a.providerTimeout)
-	edhMetrics, edhErr := a.edh.Analyze(edhCtx, target)
+	var edhMetrics map[string]any
+	var edhErr error
+	if a.edh != nil {
+		edhMetrics, edhErr = a.edh.Analyze(edhCtx, target)
+	} else {
+		edhErr = errors.New("no EDH Power Level client configured")
+	}
+	if edhErr != nil || edhMetrics == nil {
+		// The chromedp path is gone; always score via the pure-HTTP getcards + formula
+		// implementation, which no longer depends on a browser.
+		edhMetrics, edhErr = edhpowerlevel.ScoreWithCombos(edhCtx, target, a.edhHTTP, combos, catalogCMC)
+	}
 	cancelEDH()
 	if edhErr != nil {
 		analysis.Status = "partial"
@@ -477,6 +497,44 @@ func deckNames(target deck.Deck) []string {
 		names = append(names, card.Name)
 	}
 	return names
+}
+
+// catalogCMCs maps a card name (lowercased front face) to its mana value, used by the
+// bracket combo detector to sum the battlefield component costs of each 2-card combo.
+// It derives the value from the already-fetched Scryfall catalog (or the getcards CMC
+// for any names the catalog lacks) so the early/late split uses real cast costs rather
+// than the all-zero stub.
+func catalogCMCs(target deck.Deck, catalog map[string]cardcatalog.Card, getcardsCMC map[string]int) map[string]int {
+	result := make(map[string]int, len(target.Commanders)+len(target.Mainboard))
+	add := func(name string) {
+		key := strings.ToLower(frontFace(name))
+		if _, ok := result[key]; ok {
+			return
+		}
+		if card, ok := catalog[key]; ok {
+			result[key] = int(card.ManaValue())
+			return
+		}
+		if cmc, ok := getcardsCMC[key]; ok {
+			result[key] = cmc
+			return
+		}
+		result[key] = 0
+	}
+	for _, card := range target.Commanders {
+		add(card.Name)
+	}
+	for _, card := range target.Mainboard {
+		add(card.Name)
+	}
+	return result
+}
+
+func frontFace(name string) string {
+	if idx := strings.Index(name, " // "); idx >= 0 {
+		return name[:idx]
+	}
+	return name
 }
 
 func buildDisplayCards(target deck.Deck, catalog map[string]cardcatalog.Card) []DisplayCard {

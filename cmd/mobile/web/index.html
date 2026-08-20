@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="同时查询 CommanderSalt 与 EDH Power Level 的 Commander 牌组评分。">
+  <title>Commander Power Check</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">COMMANDER DECK ANALYZER</p>
+      <h1>一条链接，<br><span>两种强度视角。</span></h1>
+      <p class="intro">输入公开的 Moxfield 牌组地址，同时获取 CommanderSalt 与 EDH Power Level 的独立分析结果。</p>
+    </header>
+
+    <section class="search-panel" aria-labelledby="search-title">
+      <div class="panel-heading">
+        <span class="step">01</span>
+        <div>
+          <h2 id="search-title">输入牌组链接</h2>
+          <p>仅支持公开的 Moxfield Commander 牌组</p>
+        </div>
+      </div>
+      <form id="analyze-form" novalidate>
+        <label class="sr-only" for="deck-url">Moxfield 牌组地址</label>
+        <div class="input-row">
+          <input id="deck-url" name="url" type="url" autocomplete="url" spellcheck="false"
+            placeholder="https://moxfield.com/decks/…"
+            value="https://moxfield.com/decks/d8xoDMBAcUOKmd8VjkU66w">
+          <button id="submit-button" type="submit">
+            <span class="button-label">开始分析</span>
+            <span class="button-arrow" aria-hidden="true">↗</span>
+          </button>
+        </div>
+        <details class="decklist-input-panel">
+          <summary>或粘贴牌表文本</summary>
+          <label for="decklist-input">牌表必须包含 Commander 和 Deck 标题</label>
+          <textarea id="decklist-input" rows="10" placeholder="Commander&#10;1 Ria Ivor, Bane of Bladehold&#10;&#10;Deck&#10;1 Sol Ring"></textarea>
+          <p>填写文本时将优先使用文本作为分析牌表。</p>
+        </details>
+        <p id="form-message" class="form-message" role="alert"></p>
+      </form>
+      <div class="build-entry">
+        <button id="build-entry-button" class="ghost-button" type="button">我其实没有牌，想组牌 ↗</button>
+        <details class="rules-links-panel">
+          <summary>我想查查规则</summary>
+          <ul>
+            <li><a href="https://mtgch.com/cr" target="_blank" rel="noopener noreferrer">大学院废墟（mtgch.com/cr）</a></li>
+            <li><a href="https://www.cranial-insertion.com/" target="_blank" rel="noopener noreferrer">颅内植入（cranial-insertion.com）</a></li>
+          </ul>
+        </details>
+      </div>
+    </section>
+
+    <section id="builder" class="builder" hidden aria-live="polite">
+      <div class="builder-head">
+        <div><p class="eyebrow">DECK BUILDER</p><h2>从一张主将开始组牌</h2><p class="section-note">输入主将名称，逐轮选择与它相性的牌，直到组满 100 张。</p></div>
+        <button id="builder-close" class="ghost-button" type="button">返回分析</button>
+      </div>
+      <div class="builder-commander-row">
+        <div class="builder-commander-field">
+          <input id="builder-commander" type="text" placeholder="输入主将名称，例如 Ria Ivor, Bane of Bladehold" autocomplete="off" spellcheck="false">
+          <ul id="builder-commander-suggestions" class="builder-commander-suggestions" hidden></ul>
+        </div>
+        <button id="builder-random" class="ghost-button" type="button">随机抽主将</button>
+        <button id="builder-start" class="ghost-button" type="button">开始</button>
+      </div>
+      <div id="builder-commander-preview" class="builder-commander-preview" hidden></div>
+      <div id="builder-partner-row" class="builder-partner-row" hidden>
+        <div class="builder-commander-field">
+          <input id="builder-partner" type="text" placeholder="输入搭档主将名称（Partner / Friends Forever / 选择身世）" autocomplete="off" spellcheck="false">
+          <ul id="builder-partner-suggestions" class="builder-commander-suggestions" hidden></ul>
+        </div>
+        <button id="builder-partner-add" class="ghost-button" type="button">添加搭档</button>
+      </div>
+      <p id="builder-message" class="form-message" role="alert"></p>
+      <div id="builder-workflow" class="builder-workflow" hidden>
+        <div class="builder-main">
+          <div id="builder-candidates" class="builder-candidates"></div>
+          <div class="builder-actions">
+            <button id="builder-skip" class="ghost-button" type="button">换一批</button>
+            <button id="builder-lands" class="ghost-button" type="button">一键出地</button>
+            <button id="builder-staples" class="ghost-button" type="button">常见单卡</button>
+            <span class="builder-basics">
+              <span class="builder-basics-label">快速加基本地：</span>
+              <button type="button" data-basic="Plains">白</button>
+              <button type="button" data-basic="Island">蓝</button>
+              <button type="button" data-basic="Swamp">黑</button>
+              <button type="button" data-basic="Mountain">红</button>
+              <button type="button" data-basic="Forest">绿</button>
+              <button type="button" data-basic="Wastes">片</button>
+            </span>
+          </div>
+          <div id="builder-lands-panel" class="builder-lands-panel" hidden>
+            <div class="builder-lands-head">
+              <strong>一键出地</strong>
+            </div>
+            <div id="builder-lands-grid" class="builder-lands-grid"></div>
+            <div id="builder-lands-result" class="builder-lands-result"></div>
+          </div>
+          <div id="builder-staples-panel" class="builder-staples-panel" hidden>
+            <div class="builder-lands-head">
+              <strong>常见单卡</strong>
+            </div>
+            <div id="builder-staples-categories" class="builder-lands-grid"></div>
+            <div id="builder-staples-result" class="builder-lands-result"></div>
+          </div>
+        </div>
+        <aside id="builder-sidebar" class="builder-sidebar"></aside>
+      </div>
+      <div id="builder-complete" class="builder-complete" hidden>
+        <div class="builder-complete-head"><p class="eyebrow">DECK COMPLETE</p><h3>牌组已组满 100 张</h3><p class="section-note">现在可以导出牌表，或直接把它送去完整分析。</p></div>
+        <div class="builder-complete-actions">
+          <button id="builder-export" class="ghost-button" type="button">导出牌表</button>
+          <button id="builder-analyze" class="primary-button" type="button">送去完整分析</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="loading" class="loading" hidden aria-live="polite">
+      <div class="loader"></div>
+      <div><strong>正在分析牌组</strong><span>EDH Power Level 可能需要约一分钟</span></div>
+    </section>
+
+    <section id="results" class="results" hidden aria-live="polite">
+      <div class="deck-strip">
+        <div>
+          <p class="eyebrow">ANALYSIS COMPLETE</p>
+          <h2 id="deck-name">—</h2>
+          <p id="deck-meta">—</p>
+        </div>
+        <button id="retry-button" class="ghost-button" type="button">重新分析</button>
+      </div>
+      <div id="warning" class="warning" hidden></div>
+      <div class="result-grid">
+        <article class="result-card salt-card" data-collapsible>
+          <button type="button" class="card-topline" data-card-toggle aria-expanded="true"><span>COMMANDERSALT</span><span id="salt-status" class="status">等待</span></button>
+          <div id="salt-content" class="card-content"></div>
+          <a class="provider-link" href="https://www.commandersalt.com/" target="_blank" rel="noopener noreferrer">
+            前往 CommanderSalt <span aria-hidden="true">↗</span>
+          </a>
+        </article>
+        <article class="result-card edh-card" data-collapsible>
+          <button type="button" class="card-topline" data-card-toggle aria-expanded="true"><span>EDH POWER LEVEL</span><span id="edh-status" class="status">等待</span></button>
+          <div id="edh-content" class="card-content"></div>
+          <a class="provider-link" href="https://edhpowerlevel.com/" target="_blank" rel="noopener noreferrer">
+            前往 EDH Power Level <span aria-hidden="true">↗</span>
+          </a>
+        </article>
+      </div>
+      <section id="manabase-section" class="catalog-section" hidden>
+        <div class="section-heading toggleable" data-section-toggle data-section="manabase-section" aria-expanded="true" role="button" tabindex="0"><div><p class="eyebrow">MANABASE</p><h2>法术力基础</h2><p class="section-note">基于 Frank Karsten 的地张数回归与条件超几何模型。</p></div><button type="button" class="section-heading-toggle">收起</button></div>
+        <div id="manabase-content" class="manabase-content"></div>
+      </section>
+      <section id="construction-section" class="catalog-section" hidden>
+        <div class="section-heading toggleable" data-section-toggle data-section="construction-section" aria-expanded="true" role="button" tabindex="0"><div><p class="eyebrow">DECK CONSTRUCTION</p><h2>构筑概览</h2><p class="section-note">分类允许重叠；计划相关为启发式判断。</p></div><button type="button" class="section-heading-toggle">收起</button></div>
+        <div id="construction-metrics" class="construction-grid"></div>
+      </section>
+      <section id="combo-section" class="catalog-section" hidden>
+        <div class="section-heading toggleable" data-section-toggle data-section="combo-section" aria-expanded="true" role="button" tabindex="0"><div><p class="eyebrow">RELATED CARDS</p><h2>关联卡牌与组合</h2></div><button type="button" class="section-heading-toggle">收起</button></div>
+        <div id="combo-list" class="combo-list"></div>
+      </section>
+      <section id="recommendation-section" class="catalog-section" hidden>
+        <div class="section-heading toggleable" data-section-toggle data-section="recommendation-section" aria-expanded="true" role="button" tabindex="0"><div><p class="eyebrow">CONSTRUCTION RECOMMENDATIONS</p><h2>构筑缺口推荐</h2><p id="recommendation-keywords" class="section-note"></p></div><button type="button" class="section-heading-toggle">收起</button></div>
+        <div id="recommendation-list" class="recommendation-grid"></div>
+      </section>
+      <section id="decklist-section" class="catalog-section" hidden>
+        <div class="section-heading toggleable" data-section-toggle data-section="decklist-section" aria-expanded="true" role="button" tabindex="0"><div><p class="eyebrow">FULL DECK</p><h2>完整牌表</h2></div><div class="deck-actions" data-section-actions><button id="copy-decklist" class="ghost-button" type="button">复制牌表</button><button id="decklist-toggle" class="ghost-button" type="button">展开牌表</button><button type="button" class="section-heading-toggle">收起</button></div></div>
+        <div id="editor-toolbar" class="editor-toolbar">
+          <div class="editor-add-row">
+            <div class="editor-add-field">
+              <input id="editor-add-card" type="text" placeholder="添加卡牌（输入名称）" autocomplete="off" spellcheck="false">
+              <ul id="editor-add-suggestions" class="editor-add-suggestions" hidden></ul>
+            </div>
+            <button id="editor-add-submit" class="ghost-button" type="button">添加</button>
+          </div>
+          <div class="editor-actions">
+            <button id="editor-undo" class="ghost-button" type="button" disabled>撤销</button>
+            <button id="editor-redo" class="ghost-button" type="button" disabled>重做</button>
+            <button id="editor-save-version" class="ghost-button" type="button">保存版本</button>
+            <button id="editor-export" class="ghost-button" type="button">导出牌表</button>
+            <button id="editor-versions-toggle" class="ghost-button" type="button">版本</button>
+          </div>
+        </div>
+        <p id="editor-dirty-note" class="editor-dirty-note" hidden>当前牌表有未重新分析的本地修改；构筑指标与评分仍基于上次分析。</p>
+        <div id="editor-versions-panel" class="editor-versions-panel" hidden>
+          <div class="editor-versions-heading"><strong>已保存版本</strong><button id="editor-versions-close" class="ghost-button" type="button">关闭</button></div>
+          <div id="editor-versions-list" class="editor-versions-list"></div>
+        </div>
+        <div id="deck-card-list" class="deck-card-list collapsed"></div>
+      </section>
+      <p class="disclaimer">两个网站使用不同评分模型，结果应分别理解，不计算平均值。卡牌数据由 Scryfall 提供，组合数据由 Commander Spellbook 提供。</p>
+    </section>
+  </main>
+  <div id="swap-modal" class="swap-modal" hidden>
+    <div class="swap-backdrop" data-swap-close></div>
+    <section class="swap-panel" role="dialog" aria-modal="true" aria-labelledby="swap-title">
+      <div class="swap-panel-head"><div><p class="eyebrow">SINGLE CARD SWAP</p><h2 id="swap-title">单卡替换预览</h2><p>仅预览，不会修改 Moxfield 或保存到服务器。</p></div><button id="swap-close" class="ghost-button" type="button">关闭</button></div>
+      <div class="swap-choice"><span>加入</span><strong id="swap-add-name"></strong></div>
+      <label class="swap-search-label">筛选要移除的 Mainboard 卡牌<input id="swap-search" type="search" placeholder="输入卡牌名称"></label>
+      <div id="swap-remove-list" class="swap-remove-list"></div>
+      <p id="swap-message" class="swap-message" role="alert"></p>
+      <button id="swap-submit" class="primary-button" type="button" disabled>比较替换</button>
+      <div id="swap-result" class="swap-result" hidden></div>
+    </section>
+  </div>
+  <div id="card-preview" class="card-preview" role="tooltip" hidden>
+    <img id="card-preview-image" alt="">
+    <span id="card-preview-name"></span>
+    <span id="card-preview-oracle"></span>
+  </div>
+  <script src="/app.js" defer></script>
+  <script>document.querySelector('#editor-versions-close').addEventListener('click', () => { document.querySelector('#editor-versions-panel').hidden = true; });</script>
+</body>
+</html>

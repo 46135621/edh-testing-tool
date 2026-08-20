@@ -20,7 +20,6 @@ import (
 	"powerlevel/internal/config"
 	"powerlevel/internal/providers/cardcatalog"
 	"powerlevel/internal/providers/commandersalt"
-	"powerlevel/internal/providers/edhpowerlevel"
 	"powerlevel/internal/providers/edhrec"
 	"powerlevel/internal/providers/moxfield"
 	"powerlevel/internal/providers/spellbook"
@@ -50,29 +49,16 @@ func main() {
 			return http.ErrUseLastResponse
 		},
 	}
-	browserPath := cfg.BrowserPath
-	if browserPath == "" {
-		browserPath = edhpowerlevel.BrowserPathFromEnv()
-	}
-	if browserPath == "" {
-		logger.Error("no usable browser found", "hint", "install Chrome/Chromium/Edge or set BROWSER_PATH to its executable")
-		os.Exit(1)
-	}
 	commanderSaltClient := commandersalt.New(cfg.CommanderSaltAPIURL, httpClient)
 	moxfieldClient := moxfield.New(cfg.MoxfieldAPIURL, httpClient)
 	cardCatalogClient := cardcatalog.New(cfg.ScryfallAPIURL, httpClient, cfg.CardCatalogTTL)
 	spellbookClient := spellbook.New(cfg.SpellbookAPIURL, httpClient)
 	edhrecClient := edhrec.New(cfg.EDHRECJSONURL, httpClient)
-	edhClient, err := edhpowerlevel.New(cfg.EDHPageURL, browserPath, cfg.BrowserHeadless, cfg.EDHMaxConcurrency)
-	if err != nil {
-		logger.Error("start EDH browser", "error", err)
-		os.Exit(1)
-	}
-	defer edhClient.Close()
 	analyzer := service.NewAnalyzer(
 		moxfieldClient,
 		commanderSaltClient,
-		edhClient,
+		nil, // EDH Power Level is scored in-process via getcards (no browser client).
+		httpClient,
 		cardCatalogClient,
 		spellbookClient,
 		edhrecClient,
@@ -96,7 +82,7 @@ func main() {
 		WriteTimeout:      cfg.RequestTimeout + 5*time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	logger.Info("server starting", "address", cfg.Address, "browser", browserPath, "edh_max_concurrency", cfg.EDHMaxConcurrency)
+	logger.Info("server starting", "address", cfg.Address)
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- server.ListenAndServe()

@@ -13,12 +13,19 @@ import (
 const maxResponseSize = 6 << 20
 
 type Combo struct {
-	ID         string
-	Name       string
-	Components []Component
-	Result     string
-	Steps      []string
-	SourceURL  string
+	ID              string
+	Name            string
+	Components      []Component
+	Result          string
+	Steps           []string
+	SourceURL       string
+	ManaValueNeeded int
+	// RequiresTemplates holds the numeric template IDs of any "requires" entries
+	// (the site's `Ee.requirements` list determines which are acceptable).
+	RequiresTemplates []int
+	// ProducesFeatureIDs holds the numeric feature IDs the combo produces; the site
+	// compares these against a fixed "game-defining" producer list.
+	ProducesFeatureIDs []int
 }
 
 type Component struct {
@@ -26,6 +33,7 @@ type Component struct {
 	OracleID    string
 	ImageNormal string
 	ImageSmall  string
+	Zone        string
 }
 
 type Client struct {
@@ -38,21 +46,32 @@ type response struct {
 }
 
 type variant struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	Uses        []struct {
+	ID              string `json:"id"`
+	Description     string `json:"description"`
+	ManaValueNeeded int    `json:"manaValueNeeded"`
+	BracketTag      string `json:"bracketTag"`
+	Status          string `json:"status"`
+	Uses            []struct {
 		Card struct {
 			Name                string `json:"name"`
 			OracleID            string `json:"oracleId"`
 			ImageUriFrontNormal string `json:"imageUriFrontNormal"`
 			ImageUriFrontSmall  string `json:"imageUriFrontSmall"`
 		} `json:"card"`
+		ZoneLocations []string `json:"zoneLocations"`
 	} `json:"uses"`
 	Produces []struct {
 		Feature struct {
+			ID   int    `json:"id"`
 			Name string `json:"name"`
 		} `json:"feature"`
 	} `json:"produces"`
+	Requires []struct {
+		Quantity int `json:"quantity"`
+		Template struct {
+			ID int `json:"id"`
+		} `json:"template"`
+	} `json:"requires"`
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {
@@ -99,9 +118,21 @@ func (c *Client) Search(ctx context.Context, names []string, limit int) ([]Combo
 				continue
 			}
 			seen[item.ID] = struct{}{}
-			combo := Combo{ID: item.ID, SourceURL: "https://commanderspellbook.com/combo/" + item.ID}
+			combo := Combo{ID: item.ID, SourceURL: "https://commanderspellbook.com/combo/" + item.ID, ManaValueNeeded: item.ManaValueNeeded}
 			for _, use := range item.Uses {
-				combo.Components = append(combo.Components, Component{Name: use.Card.Name, OracleID: use.Card.OracleID, ImageNormal: use.Card.ImageUriFrontNormal, ImageSmall: use.Card.ImageUriFrontSmall})
+				zone := ""
+				if len(use.ZoneLocations) > 0 {
+					zone = strings.Join(use.ZoneLocations, ",")
+				}
+				combo.Components = append(combo.Components, Component{Name: use.Card.Name, OracleID: use.Card.OracleID, ImageNormal: use.Card.ImageUriFrontNormal, ImageSmall: use.Card.ImageUriFrontSmall, Zone: zone})
+			}
+			for _, req := range item.Requires {
+				combo.RequiresTemplates = append(combo.RequiresTemplates, req.Template.ID)
+			}
+			for _, p := range item.Produces {
+				if p.Feature.ID != 0 {
+					combo.ProducesFeatureIDs = append(combo.ProducesFeatureIDs, p.Feature.ID)
+				}
 			}
 			parts := make([]string, 0, len(combo.Components))
 			for _, part := range combo.Components {

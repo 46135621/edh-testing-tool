@@ -81,7 +81,7 @@ func TestAnalyzeWaiterCanCancelWithoutCancelingSharedWork(t *testing.T) {
 	defer server.Close()
 	edh := &blockingEDH{started: make(chan struct{}), release: make(chan struct{})}
 	analyzer := NewAnalyzer(
-		nil, commandersalt.New(server.URL, server.Client()), edh, nil, nil, nil,
+		nil, commandersalt.New(server.URL, server.Client()), edh, nil, nil, nil, nil,
 		time.Second, 3*time.Second, time.Minute, time.Second, 10,
 	)
 

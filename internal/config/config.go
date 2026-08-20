@@ -13,16 +13,12 @@ type Config struct {
 	CacheTTL            time.Duration
 	PartialCacheTTL     time.Duration
 	CacheMaxEntries     int
-	EDHMaxConcurrency   int
 	ScryfallAPIURL      string
 	CardCatalogTTL      time.Duration
 	SpellbookAPIURL     string
 	EDHRECJSONURL       string
 	MoxfieldAPIURL      string
 	CommanderSaltAPIURL string
-	EDHPageURL          string
-	BrowserPath         string
-	BrowserHeadless     bool
 }
 
 func Load() Config {
@@ -33,16 +29,12 @@ func Load() Config {
 		CacheTTL:            durationEnv("CACHE_TTL", 30*time.Minute),
 		PartialCacheTTL:     durationEnv("PARTIAL_CACHE_TTL", 45*time.Second),
 		CacheMaxEntries:     intEnv("CACHE_MAX_ENTRIES", 500, 1),
-		EDHMaxConcurrency:   intEnv("EDH_MAX_CONCURRENCY", 2, 1),
 		ScryfallAPIURL:      env("SCRYFALL_API_URL", "https://api.scryfall.com"),
 		CardCatalogTTL:      durationEnv("CARD_CATALOG_TTL", 24*time.Hour),
 		SpellbookAPIURL:     env("SPELLBOOK_API_URL", "https://backend.commanderspellbook.com"),
 		EDHRECJSONURL:       env("EDHREC_JSON_URL", "https://json.edhrec.com"),
 		MoxfieldAPIURL:      env("MOXFIELD_API_URL", "https://api2.moxfield.com"),
 		CommanderSaltAPIURL: env("COMMANDERSALT_API_URL", "https://api.commandersalt.com"),
-		EDHPageURL:          env("EDH_PAGE_URL", "https://edhpowerlevel.com/"),
-		BrowserPath:         env("BROWSER_PATH", ""),
-		BrowserHeadless:     boolEnv("BROWSER_HEADLESS", true),
 	}
 }
 

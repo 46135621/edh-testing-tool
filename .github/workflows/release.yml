@@ -107,4 +107,128 @@ jobs:
             server.exe.sha256
             edh-powerlevel-client.exe
             edh-powerlevel-client.exe.sha256
+            server-android-arm64
+            server-android-arm64.sha256
+            server-linux-arm64
+            server-linux-arm64.sha256
           generate_release_notes: true
+
+  # 移动端交叉编译：纯 Go、零 cgo，直接编译出手机可运行的二进制。
+  #   - android/arm64：绝大多数安卓手机（经 Termux 运行）
+  #   - linux/arm64：  Termux 手机、树莓派、ARM 服务器
+  #   （android/amd64 与 android/386 需要 NDK+cgo，Go 纯 Go 路径不支持，故不产出）
+  mobile:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve version from commit time
+        shell: bash
+        run: |
+          v="$(git log -1 --date=format:'%Y%m%d-%H%M' --format=%cd)"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Cross-compile mobile binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-mobile
+
+          build() {
+            local goos="$1" goarch="$2" out="$3"
+            echo ">> $goos/$goarch -> $out"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+              go build -buildvcs=false -trimpath -ldflags "-s -w" \
+              -o "dist-mobile/$out" ./cmd/server
+          }
+
+          build android arm64 server-android-arm64
+          build linux   arm64 server-linux-arm64
+
+          cd dist-mobile
+          for f in server-android-arm64 server-linux-arm64; do
+            sha256sum "$f" > "$f.sha256"
+          done
+
+      - name: Upload mobile binaries to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: |
+            dist-mobile/server-android-arm64
+            dist-mobile/server-android-arm64.sha256
+            dist-mobile/server-linux-arm64
+            dist-mobile/server-linux-arm64.sha256
+
+  # 真正的 Android APK：用 gomobile 把 cmd/mobile 打成 AAR（内嵌 HTTP 服务），
+  # 再用 android/ 壳工程的 WebView 加载本地服务,打包成可安装的 APK。
+  # 需要 Android SDK(compileSdk 34)+ NDK + JDK 17，均由 github runner 与 actions 安装。
+  mobile-apk:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Java (JDK 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-34 build-tools;34.0.0
+
+      # gradlew wrapper 二进制不进仓库，这里用系统 gradle 现场生成 wrapper。
+      - name: Setup Gradle wrapper
+        working-directory: android
+        run: |
+          sudo apt-get install -y gradle >/dev/null 2>&1 || true
+          gradle wrapper --gradle-version 8.7
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+
+      - name: Build mobile AAR (gomobile bind)
+        run: |
+          mkdir -p android/app/libs
+          gomobile bind -target=android -o android/app/libs/mobile.aar ./cmd/mobile
+
+      - name: Assemble APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Resolve version and stage APK
+        run: |
+          v="$(git log -1 --date=format:'%Y%m%d-%H%M' --format=%cd)"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          cp "$APK" "edh-powerlevel-$v.apk"
+          echo "APK_PATH=edh-powerlevel-$v.apk" >> "$GITHUB_ENV"
+
+      - name: Upload APK to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: |
+            ${{ env.APK_PATH }}
