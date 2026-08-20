@@ -44,6 +44,13 @@
       </form>
       <div class="build-entry">
         <button id="build-entry-button" class="ghost-button" type="button">我其实没有牌，想组牌 ↗</button>
+        <details class="rules-links-panel">
+          <summary>我想查查规则</summary>
+          <ul>
+            <li><a href="https://mtgch.com/cr" target="_blank" rel="noopener noreferrer">大学院废墟（mtgch.com/cr）</a></li>
+            <li><a href="https://www.cranial-insertion.com/" target="_blank" rel="noopener noreferrer">颅内植入（cranial-insertion.com）</a></li>
+          </ul>
+        </details>
       </div>
     </section>
 
@@ -57,7 +64,16 @@
           <input id="builder-commander" type="text" placeholder="输入主将名称，例如 Ria Ivor, Bane of Bladehold" autocomplete="off" spellcheck="false">
           <ul id="builder-commander-suggestions" class="builder-commander-suggestions" hidden></ul>
         </div>
+        <button id="builder-random" class="ghost-button" type="button">随机抽主将</button>
         <button id="builder-start" class="ghost-button" type="button">开始</button>
+      </div>
+      <div id="builder-commander-preview" class="builder-commander-preview" hidden></div>
+      <div id="builder-partner-row" class="builder-partner-row" hidden>
+        <div class="builder-commander-field">
+          <input id="builder-partner" type="text" placeholder="输入搭档主将名称（Partner / Friends Forever / 选择身世）" autocomplete="off" spellcheck="false">
+          <ul id="builder-partner-suggestions" class="builder-commander-suggestions" hidden></ul>
+        </div>
+        <button id="builder-partner-add" class="ghost-button" type="button">添加搭档</button>
       </div>
       <p id="builder-message" class="form-message" role="alert"></p>
       <div id="builder-workflow" class="builder-workflow" hidden>
@@ -74,6 +90,7 @@
               <button type="button" data-basic="Swamp">黑</button>
               <button type="button" data-basic="Mountain">红</button>
               <button type="button" data-basic="Forest">绿</button>
+              <button type="button" data-basic="Wastes">片</button>
             </span>
           </div>
           <div id="builder-lands-panel" class="builder-lands-panel" hidden>

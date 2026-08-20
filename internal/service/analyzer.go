@@ -64,6 +64,7 @@ type Spellbook interface {
 
 type EDHRecommender interface {
 	Recommend(context.Context, string, int) ([]edhrec.Group, []string, error)
+	CommanderRankings(context.Context) ([]edhrec.CommanderRanking, error)
 }
 
 type DeckSource interface {
@@ -89,6 +90,7 @@ type Analyzer struct {
 	requests        singleflight.Group
 	buildPoolCache  *edhrecPoolCache
 	rand            *mathrand.Rand
+	rankingsCache   *commanderRankingsCache
 }
 
 func NewAnalyzer(
@@ -118,6 +120,7 @@ func NewAnalyzer(
 		cache:           newAnalysisCache(cacheMaxEntries),
 		buildPoolCache:  newEdhrecPoolCache(10 * time.Minute),
 		rand:            mathrand.New(mathrand.NewSource(time.Now().UnixNano())),
+		rankingsCache:   newCommanderRankingsCache(6 * time.Hour),
 	}
 }
 

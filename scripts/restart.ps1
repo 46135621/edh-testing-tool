@@ -79,23 +79,46 @@ try {
     }
 
     Stop-ManagedProcess
-    Move-Item $tempBinaryPath $binaryPath -Force
+    # The old binary may still be locked briefly after Stop-ManagedProcess returns
+    # (Windows releases the file handle asynchronously), so retry the overwrite a
+    # few times before giving up.
+    $moved = $false
+    for ($i = 0; $i -lt 10; $i++) {
+        try {
+            Move-Item $tempBinaryPath $binaryPath -Force -ErrorAction Stop
+            $moved = $true
+            break
+        } catch {
+            Start-Sleep -Milliseconds 300
+        }
+    }
+    if (-not $moved) {
+        throw "Unable to replace the running server binary (file is still locked)."
+    }
 
+    # Set process-scoped env vars instead of Start-Process -Environment, which is
+    # only available on PowerShell 7+; this script runs on Windows PowerShell 5.1.
     $previousAddress = $env:APP_ADDRESS
+    $previousOpenBrowser = $env:POWERLEVEL_OPEN_BROWSER
     $env:APP_ADDRESS = $Address
+    $env:POWERLEVEL_OPEN_BROWSER = "0"
     try {
         $process = Start-Process -FilePath $binaryPath `
             -WorkingDirectory $projectRoot `
             -RedirectStandardOutput $logFile `
             -RedirectStandardError $errorLogFile `
             -PassThru `
-            -WindowStyle Hidden `
-            -Environment @{ POWERLEVEL_OPEN_BROWSER = "0" }
+            -WindowStyle Hidden
     } finally {
         if ($null -eq $previousAddress) {
             Remove-Item Env:APP_ADDRESS -ErrorAction SilentlyContinue
         } else {
             $env:APP_ADDRESS = $previousAddress
+        }
+        if ($null -eq $previousOpenBrowser) {
+            Remove-Item Env:POWERLEVEL_OPEN_BROWSER -ErrorAction SilentlyContinue
+        } else {
+            $env:POWERLEVEL_OPEN_BROWSER = $previousOpenBrowser
         }
     }
     Set-Content -Path $pidFile -Value $process.Id -NoNewline

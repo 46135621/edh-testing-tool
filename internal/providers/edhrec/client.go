@@ -3,6 +3,7 @@ package edhrec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,14 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// CommanderRanking is one commander entry from EDHREC's ranked popularity list,
+// carrying just enough to bias a random draw toward less-popular commanders.
+type CommanderRanking struct {
+	Name      string
+	DeckCount int
+	IsPartner bool
+}
+
 type page struct {
 	TagCounts []struct {
 		Slug, Value string
@@ -41,6 +50,7 @@ type page struct {
 					Synergy        float64 `json:"synergy"`
 					NumDecks       int     `json:"num_decks"`
 					PotentialDecks int     `json:"potential_decks"`
+					IsPartner      bool    `json:"is_partner"`
 				} `json:"cardviews"`
 			} `json:"cardlists"`
 		} `json:"json_dict"`
@@ -99,4 +109,49 @@ func (c *Client) Recommend(ctx context.Context, commanderSlug string, perGroupLi
 		}
 	}
 	return groups, keywords, nil
+}
+
+// CommanderRankings fetches EDHREC's ranked commander list (last two years) and
+// flattens it into name + deck-count pairs. The deck count lets a random draw bias
+// toward less-popular commanders; is_partner marks cards that may pair with a second
+// commander. The list is a single read of json.edhrec.com; it is not used for
+// recommendations or scoring elsewhere.
+func (c *Client) CommanderRankings(ctx context.Context) ([]CommanderRanking, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/pages/commanders/year.json", nil)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "PowerLevelAggregator/0.4")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request EDHREC commander rankings: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("EDHREC commander rankings returned HTTP %d", resp.StatusCode)
+	}
+	var payload page
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	rankings := make([]CommanderRanking, 0)
+	for _, list := range payload.Container.JSONDict.CardLists {
+		for _, item := range list.CardViews {
+			name := strings.TrimSpace(item.Name)
+			if name == "" {
+				continue
+			}
+			rankings = append(rankings, CommanderRanking{
+				Name:      name,
+				DeckCount: item.NumDecks,
+				IsPartner: item.IsPartner,
+			})
+		}
+	}
+	if len(rankings) == 0 {
+		return nil, errors.New("EDHREC commander rankings list is empty")
+	}
+	return rankings, nil
 }

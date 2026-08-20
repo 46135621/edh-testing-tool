@@ -72,6 +72,8 @@ func NewHandler(analyzer *service.Analyzer, logger *slog.Logger, requestTimeout 
 	mux.HandleFunc("POST /api/v1/build-staples", handler.buildStaples)
 	mux.HandleFunc("GET /api/v1/commander-autocomplete", handler.commanderAutocomplete)
 	mux.HandleFunc("GET /api/v1/card-autocomplete", handler.cardAutocomplete)
+	mux.HandleFunc("POST /api/v1/random-commander", handler.randomCommander)
+	mux.HandleFunc("POST /api/v1/resolve-commanders", handler.resolveCommanders)
 	mux.Handle("GET /", static)
 	return securityHeaders(requestLogger(logger, mux))
 }
@@ -248,6 +250,69 @@ func (h *Handler) cardAutocomplete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		Suggestions []string `json:"suggestions"`
 	}{Suggestions: names})
+}
+
+func (h *Handler) randomCommander(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, h.requestTimeout)
+	defer cancel()
+	commander, err := h.analyzer.RandomCommander(ctx)
+	if err != nil {
+		status, code, message := resolveCommandersError(err)
+		writeError(w, status, code, message)
+		return
+	}
+	writeJSON(w, http.StatusOK, commander)
+}
+
+func (h *Handler) resolveCommanders(w http.ResponseWriter, r *http.Request) {
+	body := http.MaxBytesReader(w, r.Body, 64<<10)
+	defer body.Close()
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	var request struct {
+		Commanders []string `json:"commanders"`
+	}
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "请求体必须是包含 commanders 数组的 JSON。")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "请求体只能包含一个 JSON 对象。")
+		return
+	}
+	if len(request.Commanders) == 0 {
+		writeError(w, http.StatusBadRequest, "COMMANDER_REQUIRED", "请输入主将名称。")
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, h.requestTimeout)
+	defer cancel()
+	commanders, err := h.analyzer.ResolveCommanders(ctx, request.Commanders)
+	if err != nil {
+		status, code, message := resolveCommandersError(err)
+		writeError(w, status, code, message)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Commanders    []service.ResolvedCommander `json:"commanders"`
+		ColorIdentity []string                    `json:"color_identity"`
+	}{Commanders: commanders, ColorIdentity: h.analyzer.UnionColorIdentity(commanders)})
+}
+
+func resolveCommandersError(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, service.ErrBuildCommanderNotFound):
+		return http.StatusNotFound, "COMMANDER_NOT_FOUND", "找不到该主将，请检查名称拼写。"
+	case errors.Is(err, service.ErrCommanderNotLegal):
+		return http.StatusBadRequest, "COMMANDER_NOT_LEGAL", "该卡牌不能作为主将。"
+	case errors.Is(err, service.ErrCommanderPairInvalid):
+		return http.StatusBadRequest, "COMMANDER_PAIR_INVALID", "这两张主将不能合法搭档（需要双方都带有 Partner / Friends Forever / 选择身世）。"
+	case errors.Is(err, service.ErrRandomCommanderUnavailable):
+		return http.StatusBadGateway, "RANDOM_COMMANDER_UNAVAILABLE", "暂时无法加载随机主将列表，请稍后重试。"
+	case errors.Is(err, service.ErrCardData):
+		return http.StatusBadGateway, "CARD_DATA_UNAVAILABLE", "卡牌资料不完整，暂时无法处理。"
+	default:
+		return http.StatusBadGateway, "COMMANDERS_FAILED", "暂时无法解析主将。"
+	}
 }
 
 func (h *Handler) buildLands(w http.ResponseWriter, r *http.Request) {

@@ -63,17 +63,38 @@ const builderSidebar = document.querySelector('#builder-sidebar');
 const builderComplete = document.querySelector('#builder-complete');
 const builderExport = document.querySelector('#builder-export');
 const builderAnalyze = document.querySelector('#builder-analyze');
+const builderRandomButton = document.querySelector('#builder-random');
+const builderCommanderPreview = document.querySelector('#builder-commander-preview');
+const builderPartnerRow = document.querySelector('#builder-partner-row');
+const builderPartnerInput = document.querySelector('#builder-partner');
+const builderPartnerSuggestions = document.querySelector('#builder-partner-suggestions');
+const builderPartnerAddButton = document.querySelector('#builder-partner-add');
 
 // The draft being built: commander name + already-chosen mainboard card names.
 let buildCommander = '';
+let buildCommanders = [];      // resolved commander objects { name, card?, isPartner }
 let buildChosen = [];           // card names (lowercase) already added to the draft
 let buildCards = [];            // { name, card? } resolved rows for export/analysis
 let buildColors = [];           // commander color identity (for basic-land gating)
 let buildCandidates = [];       // currently displayed 3 candidates
 let recentShown = [];           // sliding window of names shown (not chosen) in the last two refreshes
 
-const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest'];
+const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes'];
 const BUILD_TARGET = 100;
+
+// Canonical WUBRG order for the color-pip composition and symbol mapping. Symbols are
+// Scryfall-style glyphs ({W} → "{W}"), so they render as recognizable mana letters.
+const MANA_COLORS = ['W', 'U', 'B', 'R', 'G'];
+function manaSymbolFor(color) {
+  switch (color) {
+    case 'W': return '{W}';
+    case 'U': return '{U}';
+    case 'B': return '{B}';
+    case 'R': return '{R}';
+    case 'G': return '{G}';
+    default: return color;
+  }
+}
 
 // A card (basic lands excepted) is a singleton: one copy at most in the Commander
 // mainboard. We check the authoritative draft list, not the name-only `buildChosen`
@@ -100,6 +121,116 @@ function noteBuildReject(message) {
     builderMessage.textContent = '';
     buildRejectTimer = 0;
   }, 2800);
+}
+
+// Render the resolved-commander thumbnail + name into the preview strip under the
+// commander input. Shows the primary plus (for a partner pair) the partner name.
+function renderCommanderPreview(commanders) {
+  if (!Array.isArray(commanders) || commanders.length === 0) {
+    builderCommanderPreview.hidden = true;
+    builderCommanderPreview.innerHTML = '';
+    return;
+  }
+  builderCommanderPreview.innerHTML = commanders.map((commander) => {
+    const card = commander.card || {};
+    const image = cardImage(card) || cardPreviewImage(card);
+    const isPartner = commander.is_partner;
+    return `
+      <img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(commander.name)}" data-preview-src="${escapeHTML(cardPreviewImage(card) || image)}" data-preview-name="${escapeHTML(commander.name)}" data-card-text="${escapeHTML(previewTextFor(card))}">
+      <div class="builder-commander-preview-body">
+        <strong>${escapeHTML(commander.name)}</strong>
+        ${isPartner ? '<small>可搭配 Partner / Friends Forever / 选择身世</small>' : ''}
+      </div>`;
+  }).join('');
+  builderCommanderPreview.hidden = false;
+}
+
+async function resolveCommanderPreview(names) {
+  if (!names.length) {
+    renderCommanderPreview([]);
+    return null;
+  }
+  try {
+    const response = await fetch('/api/v1/resolve-commanders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commanders: names })
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      return { error: payload.error?.message || '无法解析主将。' };
+    }
+    return payload;
+  } catch {
+    return { error: '解析主将失败，请重试。' };
+  }
+}
+
+// After the primary commander is resolved, reveal the partner input only when the
+// commander actually carries a partner relationship.
+function syncPartnerUI(commanders) {
+  const primary = commanders && commanders[0];
+  if (primary && primary.is_partner) {
+    builderPartnerRow.hidden = false;
+  } else {
+    builderPartnerRow.hidden = true;
+  }
+}
+
+async function pickRandomCommander() {
+  builderRandomButton.disabled = true;
+  builderRandomButton.textContent = '抽取中…';
+  builderMessage.textContent = '';
+  try {
+    const response = await fetch('/api/v1/random-commander', { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok) {
+      builderMessage.textContent = payload.error?.message || '无法随机抽主将。';
+      return;
+    }
+    builderCommanderInput.value = payload.name || '';
+    buildCommander = payload.name || '';
+    buildCommanders = [{ name: payload.name, card: payload.card, is_partner: payload.is_partner }];
+    renderCommanderPreview(buildCommanders);
+    syncPartnerUI(buildCommanders);
+  } catch {
+    builderMessage.textContent = '随机抽主将失败，请重试。';
+  } finally {
+    builderRandomButton.disabled = false;
+    builderRandomButton.textContent = '随机抽主将';
+  }
+}
+
+async function addPartnerCommander() {
+  const secondary = builderPartnerInput.value.trim();
+  if (!secondary) {
+    builderMessage.textContent = '请输入搭档主将名称。';
+    return;
+  }
+  if (!buildCommanders.length) {
+    builderMessage.textContent = '请先确定主将。';
+    return;
+  }
+  builderMessage.textContent = '';
+  builderPartnerAddButton.disabled = true;
+  try {
+    const result = await resolveCommanderPreview([buildCommanders[0].name, secondary]);
+    if (result.error) {
+      builderMessage.textContent = result.error;
+      return;
+    }
+    const commanders = result.commanders || [];
+    buildCommanders = commanders.map((c) => ({ name: c.name, card: c.card, is_partner: c.is_partner }));
+    buildColors = (result.color_identity || []).slice();
+    buildCommander = buildCommanders.map((c) => c.name).join(' // ');
+    renderCommanderPreview(buildCommanders);
+    renderBuilderSidebar();
+    builderPartnerInput.value = '';
+  } catch {
+    builderMessage.textContent = '添加搭档失败，请重试。';
+  } finally {
+    builderPartnerAddButton.disabled = false;
+  }
 }
 
 // 一键出地的地牌分类。ID 与后端 service.LandCategories 对齐；点单类后按主将色组
@@ -138,11 +269,16 @@ function openBuilder() {
   builderComplete.hidden = true;
   builderCommanderInput.value = '';
   buildCommander = '';
+  buildCommanders = [];
   buildChosen = [];
   buildCards = [];
   buildColors = [];
   buildCandidates = [];
   recentShown = [];
+  builderCommanderPreview.hidden = true;
+  builderCommanderPreview.innerHTML = '';
+  builderPartnerRow.hidden = true;
+  builderPartnerInput.value = '';
   builderCommanderInput.focus();
   builder.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -405,7 +541,7 @@ function addStapleCard(name, card, gameChanger) {
     noteBuildReject('"' + name + '" 是重复普通牌，只能放一张（基本地除外）。');
     return;
   }
-  if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
+  if (buildCards.length + (buildCommanders.length || (buildCommander ? 1 : 0)) >= BUILD_TARGET) return;
   buildChosen.push(key);
   const entry = { name, card: card || { name, type_line: 'Artifact' } };
   if (gameChanger) entry.game_changer = true;
@@ -498,7 +634,7 @@ function addLandCard(name) {
     noteBuildReject('"' + name + '" 已经在牌组里了，普通地同样受单卡限制。');
     return;
   }
-  if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
+  if (buildCards.length + (buildCommanders.length || (buildCommander ? 1 : 0)) >= BUILD_TARGET) return;
   buildChosen.push(normalizeBuildName(name));
   buildCards.push({ name, card: { name, type_line: 'Land' } });
   renderBuilderSidebar();
@@ -511,7 +647,7 @@ function addLandCard(name) {
 }
 
 function isBuilderComplete() {
-  return buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET;
+  return buildCards.length + (buildCommanders.length || (buildCommander ? 1 : 0)) >= BUILD_TARGET;
 }
 
 // After a quick-add (land / basic / staple / candidate) puts a card into the draft,
@@ -537,15 +673,31 @@ async function startBuild() {
   builderStartButton.disabled = true;
   builderStartButton.textContent = '加载中…';
   try {
+    // Resolve the (single, or already-paired) commander(s) for color identity and
+    // display data; the build-suggest call below only seeds the candidate hand.
+    // If the user hand-typed a name that differs from the last resolved/random
+    // commander, treat the input as a fresh single commandere (dropping any stale
+    // partner state) rather than re-resolving the previous selection.
+    const inputDiffers = !buildCommanders.length || buildCommanders.map((c) => c.name).join(' // ') !== name;
+    const commanders = inputDiffers ? [{ name, card: null, is_partner: false }] : buildCommanders;
+    const resolved = await resolveCommanderPreview(commanders.map((c) => c.name));
+    if (resolved.error) {
+      builderMessage.textContent = resolved.error;
+      return;
+    }
+    buildCommanders = (resolved.commanders || []).map((c) => ({ name: c.name, card: c.card, is_partner: c.is_partner }));
+    buildColors = (resolved.color_identity || []).slice();
+    buildCommander = buildCommanders.map((c) => c.name).join(' // ');
+    renderCommanderPreview(buildCommanders);
+    syncPartnerUI(buildCommanders);
+
     const response = await fetch('/api/v1/build-suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commander: name, chosen: [], seen: [], count: 3 })
+      body: JSON.stringify({ commander: buildCommanders[0].name, chosen: [], seen: [], count: 3 })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error?.message || '无法加载主将建议。');
-    buildCommander = payload.commander_name || name;
-    buildColors = payload.color_identity || [];
     buildChosen = [];
     buildCards = [];
     recentShown = [];
@@ -674,8 +826,9 @@ function addBuildCard(candidate) {
 function addBasicLand(type) {
   const key = type.toLowerCase();
   const count = buildCards.filter((card) => card.name.toLowerCase() === key).length;
-  // Basic lands may appear in multiples; still avoid exceeding the 100-card ceiling.
-  if (buildCards.length + (buildCommander ? 1 : 0) >= BUILD_TARGET) return;
+  // Basic lands (including the colorless Wastes) may appear in multiples; still avoid
+  // exceeding the 100-card ceiling.
+  if (buildCards.length + (buildCommanders.length || (buildCommander ? 1 : 0)) >= BUILD_TARGET) return;
   buildCards.push({ name: type, card: { name: type, type_line: `Basic Land — ${type}` } });
   renderBuilderSidebar();
   if (isBuilderComplete()) {
@@ -715,7 +868,7 @@ function renderBuilderSidebar() {
       }
     }
   }
-  const total = buildCards.length + (buildCommander ? 1 : 0);
+  const total = buildCards.length + (buildCommanders.length || (buildCommander ? 1 : 0));
 
   // Aggregate the drafted mainboard by name so the list shows "2× Sol Ring" style
   // rows. Card objects are kept so a later hover preview can reuse their art.
@@ -739,8 +892,19 @@ function renderBuilderSidebar() {
         </span>
       </li>`).join('');
 
+  const commanderBox = buildCommanders.length ? `
+    <div class="builder-commander-box">
+      <div class="builder-commander-box-head"><strong>主将</strong><span>${buildCommanders.length}</span></div>
+      <ul class="builder-commander-box-list">${buildCommanders.map((commander) => {
+        const card = commander.card || {};
+        const image = cardImage(card) || cardPreviewImage(card);
+        return `<li class="builder-commander-box-item" data-preview-src="${escapeHTML(cardPreviewImage(card) || image)}" data-preview-name="${escapeHTML(commander.name)}" data-card-text="${escapeHTML(previewTextFor(card))}">${image ? `<img loading="lazy" src="${escapeHTML(image)}" alt="${escapeHTML(commander.name)}">` : '<div class="builder-candidate-placeholder"></div>'}<span>${escapeHTML(commander.name)}</span></li>`;
+      }).join('')}</ul>
+    </div>` : '';
+
   builderSidebar.innerHTML = `
     <div class="builder-progress"><strong>${total}</strong><span>/ ${BUILD_TARGET} 张</span></div>
+    ${commanderBox}
     ${BUILD_METRICS.map((metric) => {
       const actual = current[metric.id] || 0;
       const pct = Math.min(100, Math.round((actual / Math.max(1, metric.target)) * 100));
@@ -782,7 +946,8 @@ function builderCardMatches(id, card) {
 }
 
 function builderToDeckText() {
-  const commanderLine = buildCommander ? `1 ${buildCommander}` : '';
+  const commanderNames = buildCommanders.length ? buildCommanders.map((c) => c.name) : (buildCommander ? [buildCommander] : []);
+  const commanderLines = commanderNames.map((name) => `1 ${name}`);
   const counts = new Map();
   for (const card of buildCards) {
     const key = normalizeBuildName(card.name);
@@ -792,7 +957,7 @@ function builderToDeckText() {
     counts.get(key).count += 1;
   }
   const mainboardLines = Array.from(counts.values()).map((entry) => `${entry.count} ${entry.name}`);
-  return `Commander\n${commanderLine}\n\nDeck\n${mainboardLines.join('\n')}`;
+  return `Commander\n${commanderLines.join('\n')}\n\nDeck\n${mainboardLines.join('\n')}`;
 }
 
 buildEntryButton.addEventListener('click', openBuilder);
@@ -801,6 +966,8 @@ builderStartButton.addEventListener('click', startBuild);
 builderSkip.addEventListener('click', nextBuildBatch);
 builderLandsButton.addEventListener('click', toggleLandsPanel);
 builderStaplesButton.addEventListener('click', toggleStaplesPanel);
+builderRandomButton.addEventListener('click', pickRandomCommander);
+builderPartnerAddButton.addEventListener('click', addPartnerCommander);
 // Collapse/expand the two provider result cards when their top bar is clicked.
 document.addEventListener('click', (event) => {
   const toggle = event.target.closest('[data-card-toggle]');
@@ -1025,14 +1192,27 @@ function renderManabase(manabase) {
     short: '地数不足'
   }[deltaClass];
 
-  // 法术力构成（非地牌，含主将）：按卡牌类别统计。
-  const typeLines = (manabase.card_type_counts || {});
+  // 法术力构成：按颜色法术力标的（蓝/白/黑/红/绿）统计牌组需要多少个彩色法术力符号。
+  // 每根的填充长度 = 该色符文数 / 全部彩色符文总数：不足 100% 的部分是其它颜色
+  // 占掉的比例，让各颜色需求比例一眼可读。
+  const colorPips = (manabase.color_pips || {});
   let composition = '';
-  if (Object.keys(typeLines).length) {
+  if (Object.keys(colorPips).length) {
+    const totalPips = Object.values(colorPips).reduce((sum, n) => sum + (Number(n) || 0), 0);
+    const pipRows = MANA_COLORS.map((color) => {
+      const count = Number(colorPips[color] || 0);
+      const pct = totalPips > 0 ? Math.round((count / totalPips) * 100) : 0;
+      const symbol = manaSymbolFor(color);
+      return `
+        <div class="manabase-pip-row" data-color="${color}">
+          <span class="mana-symbol ${color.toLowerCase()}">${symbol}</span>
+          <div class="manabase-pip-track"><i data-pct="${pct}"></i></div>
+          <strong>${count}</strong>
+        </div>`;
+    }).join('');
     composition = `
-      <div class="manabase-table-heading"><span>法术力构成</span><small>按卡牌类别（非地牌 · 含主将）</small></div>
-      <div class="manabase-table">${Object.entries(typeLines).map(([type, count]) => `
-        <div class="manabase-table-row"><span>${escapeHTML(type)}</span><strong>${Number(count) || 0}</strong></div>`).join('')}</div>`;
+      <div class="manabase-table-heading"><span>法术力构成</span><small>各颜色法术力符号数量</small></div>
+      <div class="manabase-pips">${pipRows}</div>`;
   }
 
   const curveHTML = costCounts.length ? (() => {
@@ -1071,10 +1251,19 @@ function renderManabase(manabase) {
 
   // Bars start at height 0 (via CSS) and grow to their data-height on the next frame,
   // so the curve animates in rather than jumping to final size.
+  // 颜色比例条也在这里用像素宽度着色，而不是依赖内联百分比宽度：某些渲染器（含
+  // IAB）会把对内联百分比的解析忽略掉，导致每根都被拉满。像素宽度对该选择器内
+  // 的元素不会歧义，始终正确。
   requestAnimationFrame(() => {
     container.querySelectorAll('.manabase-curve-bar i').forEach((bar) => {
       const height = parseFloat(bar.dataset.height) || 0;
       bar.style.height = height + 'px';
+    });
+    container.querySelectorAll('.manabase-pip-track i').forEach((bar) => {
+      const pct = parseFloat(bar.dataset.pct) || 0;
+      const track = bar.parentElement;
+      const trackW = track ? track.getBoundingClientRect().width : 0;
+      bar.style.width = trackW > 0 ? Math.round((pct / 100) * trackW) + 'px' : '0px';
     });
   });
 }
@@ -1087,9 +1276,10 @@ function renderColorFinding(finding) {
   const adequate = !Number.isFinite(deficit) || deficit <= 0;
   const pct = required > 0 ? Math.min(100, Math.round((actual / required) * 100)) : 100;
   const driving = String(finding.driving_spell ?? '').trim();
+  const symbol = manaSymbolFor(String(finding.color ?? '').toUpperCase());
   return `
     <div class="manabase-color ${adequate ? 'adequate' : 'short'}">
-      <div class="manabase-color-head"><span class="mana-symbol">${color}</span><div><strong>${required}</strong> 需求来源 / <strong>${formatNumber(actual, 1)}</strong> 当前</div></div>
+      <div class="manabase-color-head"><span class="mana-symbol ${color.toLowerCase()}">${symbol}</span><div><strong>${required}</strong> 需求来源 / <strong>${formatNumber(actual, 1)}</strong> 当前</div></div>
       <div class="manabase-color-bar"><i style="width:${pct}%"></i></div>
       <div class="manabase-color-meta">${adequate ? '来源充足' : `缺少约 ${formatNumber(deficit, 1)} 个来源`}${driving ? ` · 需求由 ${escapeHTML(driving)} 的多色费用驱动` : ''}</div>
     </div>`;
@@ -1104,10 +1294,22 @@ function renderConstructionReport(report) {
     const percent = Math.min(100, Math.round((Number(metric.actual) / Math.max(1, Number(metric.target))) * 100));
     const cards = (metric.cards || []).map((card) => `<li><strong>${card.quantity}× ${escapeHTML(card.name)}</strong><span>${escapeHTML(card.reason)}</span></li>`).join('');
     return `<details class="construction-metric ${metric.status}">
-      <summary><div><span>${escapeHTML(metric.label)}</span><strong>${metric.actual} / ${metric.target}</strong></div><div class="construction-bar"><i style="width:${percent}%"></i></div><small>${metric.gap > 0 ? `缺少 ${metric.gap}` : '已充分'}</small></summary>
+      <summary><div><span>${escapeHTML(metric.label)}</span><strong>${metric.actual} / ${metric.target}</strong></div><div class="construction-bar"><i data-pct="${percent}"></i></div><small>${metric.gap > 0 ? `缺少 ${metric.gap}` : '已充分'}</small></summary>
       ${cards ? `<ul>${cards}</ul>` : '<p>没有识别到相关卡牌。</p>'}
     </details>`;
   }).join('');
+
+  // Fill bars by pixel width on the next frame instead of inline percent width, for
+  // the same reason the manabase pip bars do: some renderers (the IAB included) drop
+  // inline percentage widths and stretch every bar full.
+  requestAnimationFrame(() => {
+    container.querySelectorAll('.construction-bar i').forEach((bar) => {
+      const pct = parseFloat(bar.dataset.pct) || 0;
+      const track = bar.parentElement;
+      const trackW = track ? track.getBoundingClientRect().width : 0;
+      bar.style.width = trackW > 0 ? Math.round((pct / 100) * trackW) + 'px' : '0px';
+    });
+  });
 }
 
 function buildDeckText(cards) {
@@ -1661,15 +1863,15 @@ function hideCardPreview() {
 }
 
 document.addEventListener('pointerover', (event) => {
-  const trigger = event.target.closest('.mtg-card, .builder-candidate, .builder-chosen-item');
+  const trigger = event.target.closest('.mtg-card, .builder-candidate, .builder-chosen-item, .builder-commander-box-item, .builder-commander-preview img');
   if (trigger && !trigger.contains(event.relatedTarget)) showCardPreview(trigger);
 });
 document.addEventListener('pointerout', (event) => {
-  const trigger = event.target.closest('.mtg-card, .builder-candidate, .builder-chosen-item');
+  const trigger = event.target.closest('.mtg-card, .builder-candidate, .builder-chosen-item, .builder-commander-box-item, .builder-commander-preview img');
   if (trigger && !trigger.contains(event.relatedTarget)) hideCardPreview();
 });
-document.addEventListener('focusin', (event) => { if (event.target.matches('.mtg-card, .builder-candidate, .builder-chosen-item')) showCardPreview(event.target); });
-document.addEventListener('focusout', (event) => { if (event.target.matches('.mtg-card, .builder-candidate, .builder-chosen-item')) hideCardPreview(); });
+document.addEventListener('focusin', (event) => { if (event.target.matches('.mtg-card, .builder-candidate, .builder-chosen-item, .builder-commander-box-item, .builder-commander-preview img')) showCardPreview(event.target); });
+document.addEventListener('focusout', (event) => { if (event.target.matches('.mtg-card, .builder-candidate, .builder-chosen-item, .builder-commander-box-item, .builder-commander-preview img')) hideCardPreview(); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideCardPreview(); });
 window.addEventListener('scroll', hideCardPreview, { passive: true });
 window.addEventListener('resize', hideCardPreview);

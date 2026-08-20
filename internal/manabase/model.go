@@ -131,9 +131,10 @@ type Report struct {
 	// CostCounts is the mana curve: non-land spell counts by mana value.
 	CostCounts []CostCount `json:"cost_counts"`
 
-	// CardTypeCounts is the spell-type composition of non-land cards (creature,
-	// artifact, planeswalker, sorcery/instant, etc.), keyed by a short type label.
-	CardTypeCounts map[string]int `json:"card_type_counts"`
+	// ColorPips is the color composition of the deck's spells: the total number of
+	// each colored mana pip (W/U/B/R/G) across non-land cards. It feeds the 法术力构成
+	// visualization, mirroring the per-color source demand in a raw pip count.
+	ColorPips map[string]int `json:"color_pips"`
 
 	// ColorFindings is per-color source findings. Stage 1 keeps deck order; no
 	// composite tail-risk ordering is applied.

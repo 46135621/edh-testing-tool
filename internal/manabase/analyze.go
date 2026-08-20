@@ -3,7 +3,6 @@ package manabase
 import (
 	"sort"
 	"strconv"
-	"strings"
 
 	"powerlevel/internal/providers/cardcatalog"
 )
@@ -39,7 +38,7 @@ func Analyze(entries []ClassifyEntry) Report {
 		RampAndDrawUnderThree: deck.RampAndDrawUnderThree,
 		FastMana:              deck.FastMana,
 		CostCounts:            buildCostCounts(deck),
-		CardTypeCounts:        buildCardTypeCounts(deck, entries),
+		ColorPips:             buildColorPipCounts(deck),
 		ColorFindings:         buildColorFindings(deck, deckSize),
 	}
 	return report
@@ -75,32 +74,19 @@ func buildCostCounts(deck ManabaseDeck) []CostCount {
 	return counts
 }
 
-// buildCardTypeCounts tallies non-land cards by their broad spell/permanent type for
-// the "法术力构成" table. `entries` are the original resolved deck cards (with type
-// lines) so we can classify types the SpellRequirement list dropped. Commanders are
-// included, so the composition matches the full non-land portion of the deck.
-func buildCardTypeCounts(deck ManabaseDeck, entries []ClassifyEntry) map[string]int {
+// buildColorPipCounts tallies the total colored pips (W/U/B/R/G) across all non-land,
+// non-commander spells, weighted by deck quantity. It is the raw "how many of each
+// colored symbol does the deck want" figure that drives the 法术力构成 visualization.
+// Colorless ({C}) and snow pips are intentionally excluded — the composition is about
+// colored mana demand.
+func buildColorPipCounts(deck ManabaseDeck) map[string]int {
 	counts := make(map[string]int)
-	for _, entry := range entries {
-		typeLine := strings.ToLower(entry.Card.TypeLine)
-		if strings.Contains(typeLine, "land") {
-			continue
-		}
-		switch {
-		case strings.Contains(typeLine, "creature"):
-			counts["生物"] += entry.Quantity
-		case strings.Contains(typeLine, "planeswalker"):
-			counts["鹏洛客"] += entry.Quantity
-		case strings.Contains(typeLine, "artifact"):
-			counts["神器"] += entry.Quantity
-		case strings.Contains(typeLine, "enchantment"):
-			counts["结界"] += entry.Quantity
-		case strings.Contains(typeLine, "instant"):
-			counts["瞬间"] += entry.Quantity
-		case strings.Contains(typeLine, "sorcery"):
-			counts["法术"] += entry.Quantity
-		default:
-			counts["其他"] += entry.Quantity
+	for _, spell := range deck.Spells {
+		for color, pips := range spell.Pips {
+			if color == ColorColorless || pips <= 0 {
+				continue
+			}
+			counts[color.String()] += pips * spell.Quantity
 		}
 	}
 	return counts
